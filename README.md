@@ -18,6 +18,7 @@ This repository now includes:
   - Camera/Light: `create_camera`, `set_active_camera`, `create_light`
   - Compositor/Passes: `enable_compositor`, `list_compositor_nodes`, `add_compositor_node`, `link_compositor_nodes`, `set_view_layer_passes`
   - Rendering: `render_still`, `render_animation`
+  - High-level Workflows: `workflow_setup_studio`, `workflow_create_turntable`, `workflow_turntable_render`
   - I/O: `import_file`, `export_file`
   - Advanced: `execute_blender_code` (disabled by default, opt-in in add-on preferences)
 - Milestone and protocol docs for completing a production implementation.

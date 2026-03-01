@@ -237,3 +237,37 @@ def test_modifiers_collections_and_compositor(bridge_client: BlenderBridgeClient
     assert comp["use_nodes"] is True
 
     bridge_client.call("set_view_layer_passes", {"use_pass_z": True, "use_pass_normal": True})
+
+
+def test_high_level_workflow_turntable_render(
+    bridge_client: BlenderBridgeClient,
+    tmp_path: Path,
+) -> None:
+    bridge_client.call("new_scene", {"use_empty": True})
+
+    render_dir = tmp_path / "turntable"
+    output_prefix = render_dir / "frame_"
+
+    result = bridge_client.call(
+        "workflow_turntable_render",
+        {
+            "output_path": str(output_prefix),
+            "object_name": "WorkflowSubject",
+            "frame_start": 1,
+            "frame_end": 3,
+            "rotations": 0.5,
+            "axis": "Z",
+            "setup_studio": True,
+            "primitive": "CUBE",
+            "size": 1.5,
+            "add_ground": True,
+            "engine": "BLENDER_WORKBENCH",
+            "resolution_x": 64,
+            "resolution_y": 64,
+        },
+    )
+    assert result["rendered"] is True
+    assert result["object_name"] == "WorkflowSubject"
+
+    rendered_files = list(render_dir.glob("frame_*"))
+    assert rendered_files, "Expected rendered animation frames to exist"

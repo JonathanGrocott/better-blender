@@ -110,6 +110,9 @@ Failure:
 - `set_view_layer_passes`
 - `render_still`
 - `render_animation`
+- `workflow_setup_studio`
+- `workflow_create_turntable`
+- `workflow_turntable_render`
 - `import_file`
 - `export_file`
 - `execute_code` (requires add-on preference `allow_unsafe_code=true`)

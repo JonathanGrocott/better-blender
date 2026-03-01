@@ -7,6 +7,7 @@ All bpy operations execute on Blender's main thread through a timer-drained queu
 from __future__ import annotations
 
 import json
+import math
 import queue
 import socketserver
 import threading
@@ -16,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 import bpy
+from mathutils import Vector
 
 bl_info = {
     "name": "Better Blender Bridge",
@@ -407,6 +409,57 @@ def _resolve_geometry_input_identifier(
                 return identifier, socket.name
 
     raise ValueError(f"Geometry input not found: {input_name_or_identifier}")
+
+
+def _ensure_subject_object(
+    object_name: str,
+    primitive: str = "CUBE",
+    size: float = 2.0,
+) -> bpy.types.Object:
+    obj = bpy.data.objects.get(object_name)
+    if obj is not None:
+        return obj
+
+    primitive = primitive.upper()
+    if primitive == "CUBE":
+        bpy.ops.mesh.primitive_cube_add(size=size, location=(0.0, 0.0, size / 2))
+    elif primitive == "UV_SPHERE":
+        bpy.ops.mesh.primitive_uv_sphere_add(radius=size / 2, location=(0.0, 0.0, size / 2))
+    elif primitive == "CYLINDER":
+        bpy.ops.mesh.primitive_cylinder_add(
+            radius=size / 2,
+            depth=size,
+            location=(0.0, 0.0, size / 2),
+        )
+    else:
+        raise ValueError(f"Unsupported primitive for workflow: {primitive}")
+
+    created = bpy.context.active_object
+    if created is None:
+        raise RuntimeError("Failed to create subject object")
+    created.name = object_name
+    return created
+
+
+def _create_or_update_light(
+    name: str,
+    light_type: str,
+    energy: float,
+    location: tuple[float, float, float],
+) -> bpy.types.Object:
+    light_object = bpy.data.objects.get(name)
+    if light_object is not None and light_object.type == "LIGHT":
+        light_object.location = location
+        if hasattr(light_object.data, "energy"):
+            light_object.data.energy = energy
+        return light_object
+
+    light_data = bpy.data.lights.new(name=f"{name}Data", type=light_type)
+    light_data.energy = energy
+    light_object = bpy.data.objects.new(name, light_data)
+    bpy.context.scene.collection.objects.link(light_object)
+    light_object.location = location
+    return light_object
 
 
 def _dispatch_command(method: str, params: dict[str, Any]) -> dict[str, Any]:
@@ -1523,6 +1576,180 @@ def _dispatch_command(method: str, params: dict[str, Any]) -> dict[str, Any]:
             "unsupported": unsupported,
         }
 
+    if method == "workflow_setup_studio":
+        object_name = params.get("object_name", "Subject")
+        primitive = params.get("primitive", "CUBE")
+        add_ground = bool(params.get("add_ground", True))
+        camera_name = params.get("camera_name", "WorkflowCamera")
+        key_energy = float(params.get("key_energy", 1200.0))
+        fill_energy = float(params.get("fill_energy", 600.0))
+        rim_energy = float(params.get("rim_energy", 900.0))
+        camera_distance = float(params.get("camera_distance", 6.0))
+        camera_height = float(params.get("camera_height", 3.0))
+
+        if not isinstance(object_name, str) or not object_name:
+            raise ValueError("object_name must be a non-empty string")
+        if not isinstance(primitive, str) or not primitive:
+            raise ValueError("primitive must be a non-empty string")
+        if not isinstance(camera_name, str) or not camera_name:
+            raise ValueError("camera_name must be a non-empty string")
+
+        subject = _ensure_subject_object(
+            object_name=object_name,
+            primitive=primitive,
+            size=float(params.get("size", 2.0)),
+        )
+
+        target = Vector(subject.location)
+        camera_location = target + Vector((0.0, -camera_distance, camera_height))
+        camera = bpy.data.objects.get(camera_name)
+        if camera is None or camera.type != "CAMERA":
+            camera_data = bpy.data.cameras.new(f"{camera_name}Data")
+            camera = bpy.data.objects.new(camera_name, camera_data)
+            bpy.context.scene.collection.objects.link(camera)
+        camera.location = camera_location
+        direction = target - camera.location
+        if direction.length > 0:
+            camera.rotation_euler = direction.to_track_quat("-Z", "Y").to_euler()
+        bpy.context.scene.camera = camera
+
+        key = _create_or_update_light(
+            name="WorkflowKeyLight",
+            light_type="AREA",
+            energy=key_energy,
+            location=tuple(
+                target + Vector((camera_distance * 0.8, -camera_distance * 0.8, camera_height))
+            ),
+        )
+        fill = _create_or_update_light(
+            name="WorkflowFillLight",
+            light_type="AREA",
+            energy=fill_energy,
+            location=tuple(
+                target
+                + Vector((-camera_distance * 0.8, -camera_distance * 0.5, camera_height * 0.7))
+            ),
+        )
+        rim = _create_or_update_light(
+            name="WorkflowRimLight",
+            light_type="AREA",
+            energy=rim_energy,
+            location=tuple(target + Vector((0.0, camera_distance * 0.9, camera_height))),
+        )
+
+        ground_name = "WorkflowGround"
+        if add_ground:
+            ground = bpy.data.objects.get(ground_name)
+            if ground is None:
+                bpy.ops.mesh.primitive_plane_add(size=20.0, location=(0.0, 0.0, 0.0))
+                ground = bpy.context.active_object
+                if ground is not None:
+                    ground.name = ground_name
+            if ground is not None:
+                ground.location.z = float(subject.location.z - subject.dimensions.z * 0.5)
+
+        return {
+            "subject": _serialize_object(subject),
+            "camera": _serialize_object(camera),
+            "lights": [key.name, fill.name, rim.name],
+            "ground": ground_name if add_ground else None,
+        }
+
+    if method == "workflow_create_turntable":
+        object_name = params.get("object_name")
+        frame_start = int(params.get("frame_start", 1))
+        frame_end = int(params.get("frame_end", 120))
+        rotations = float(params.get("rotations", 1.0))
+        axis = params.get("axis", "Z")
+
+        obj = _require_object(object_name)
+        if not isinstance(axis, str) or axis.upper() not in {"X", "Y", "Z"}:
+            raise ValueError("axis must be one of X, Y, Z")
+
+        axis_index = {"X": 0, "Y": 1, "Z": 2}[axis.upper()]
+        scene = bpy.context.scene
+        scene.frame_start = frame_start
+        scene.frame_end = frame_end
+
+        start_rotation = [float(v) for v in obj.rotation_euler]
+        end_rotation = start_rotation.copy()
+        end_rotation[axis_index] = start_rotation[axis_index] + (2.0 * math.pi * rotations)
+
+        scene.frame_set(frame_start)
+        obj.rotation_euler = tuple(start_rotation)
+        obj.keyframe_insert(data_path="rotation_euler", frame=frame_start)
+        scene.frame_set(frame_end)
+        obj.rotation_euler = tuple(end_rotation)
+        obj.keyframe_insert(data_path="rotation_euler", frame=frame_end)
+
+        action_name: str | None = None
+        if obj.animation_data is not None and obj.animation_data.action is not None:
+            action_name = obj.animation_data.action.name
+        return {
+            "object_name": obj.name,
+            "axis": axis.upper(),
+            "rotations": rotations,
+            "frame_start": scene.frame_start,
+            "frame_end": scene.frame_end,
+            "action": action_name,
+        }
+
+    if method == "workflow_turntable_render":
+        object_name = params.get("object_name", "Subject")
+        output_path = _normalize_path(params.get("output_path"), require_exists=False)
+        frame_start = int(params.get("frame_start", 1))
+        frame_end = int(params.get("frame_end", 120))
+        resolution_x = int(params.get("resolution_x", 512))
+        resolution_y = int(params.get("resolution_y", 512))
+        setup_studio = bool(params.get("setup_studio", True))
+
+        if setup_studio:
+            _dispatch_command(
+                "workflow_setup_studio",
+                {
+                    "object_name": object_name,
+                    "primitive": params.get("primitive", "CUBE"),
+                    "add_ground": params.get("add_ground", True),
+                    "size": params.get("size", 2.0),
+                },
+            )
+
+        _dispatch_command(
+            "workflow_create_turntable",
+            {
+                "object_name": object_name,
+                "frame_start": frame_start,
+                "frame_end": frame_end,
+                "rotations": params.get("rotations", 1.0),
+                "axis": params.get("axis", "Z"),
+            },
+        )
+
+        scene = bpy.context.scene
+        engine = params.get("engine")
+        if isinstance(engine, str) and engine:
+            scene.render.engine = engine
+        scene.render.resolution_x = resolution_x
+        scene.render.resolution_y = resolution_y
+        if (
+            isinstance(params.get("samples"), int)
+            and params.get("samples") > 0
+            and hasattr(scene, "cycles")
+        ):
+            scene.cycles.samples = int(params.get("samples"))
+
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+        scene.render.filepath = output_path
+        bpy.ops.render.render(animation=True)
+        return {
+            "rendered": True,
+            "object_name": object_name,
+            "filepath": output_path,
+            "frame_start": scene.frame_start,
+            "frame_end": scene.frame_end,
+            "engine": scene.render.engine,
+        }
+
     if method == "render_still":
         filepath = _normalize_path(params.get("filepath"), require_exists=False)
         Path(filepath).parent.mkdir(parents=True, exist_ok=True)
@@ -1806,6 +2033,9 @@ def _supported_methods() -> list[str]:
         "add_compositor_node",
         "link_compositor_nodes",
         "set_view_layer_passes",
+        "workflow_setup_studio",
+        "workflow_create_turntable",
+        "workflow_turntable_render",
         "render_still",
         "render_animation",
         "import_file",

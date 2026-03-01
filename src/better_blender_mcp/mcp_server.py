@@ -759,6 +759,97 @@ def create_server(client: BlenderBridgeClient) -> Any:
             params["use_pass_ambient_occlusion"] = use_pass_ambient_occlusion
         return client.call("set_view_layer_passes", params)
 
+    @server.tool(name="workflow_setup_studio")
+    def workflow_setup_studio(
+        object_name: str = "Subject",
+        primitive: str = "CUBE",
+        size: float = 2.0,
+        add_ground: bool = True,
+        camera_name: str = "WorkflowCamera",
+        camera_distance: float = 6.0,
+        camera_height: float = 3.0,
+        key_energy: float = 1200.0,
+        fill_energy: float = 600.0,
+        rim_energy: float = 900.0,
+    ) -> dict[str, Any]:
+        """Set up a studio-style scene with subject, camera, and three-point lighting."""
+
+        return client.call(
+            "workflow_setup_studio",
+            {
+                "object_name": object_name,
+                "primitive": primitive,
+                "size": size,
+                "add_ground": add_ground,
+                "camera_name": camera_name,
+                "camera_distance": camera_distance,
+                "camera_height": camera_height,
+                "key_energy": key_energy,
+                "fill_energy": fill_energy,
+                "rim_energy": rim_energy,
+            },
+        )
+
+    @server.tool(name="workflow_create_turntable")
+    def workflow_create_turntable(
+        object_name: str,
+        frame_start: int = 1,
+        frame_end: int = 120,
+        rotations: float = 1.0,
+        axis: str = "Z",
+    ) -> dict[str, Any]:
+        """Create turntable keyframes on an object."""
+
+        return client.call(
+            "workflow_create_turntable",
+            {
+                "object_name": object_name,
+                "frame_start": frame_start,
+                "frame_end": frame_end,
+                "rotations": rotations,
+                "axis": axis,
+            },
+        )
+
+    @server.tool(name="workflow_turntable_render")
+    def workflow_turntable_render(
+        output_path: str,
+        object_name: str = "Subject",
+        frame_start: int = 1,
+        frame_end: int = 120,
+        rotations: float = 1.0,
+        axis: str = "Z",
+        setup_studio: bool = True,
+        primitive: str = "CUBE",
+        size: float = 2.0,
+        add_ground: bool = True,
+        engine: str | None = None,
+        resolution_x: int = 512,
+        resolution_y: int = 512,
+        samples: int | None = None,
+    ) -> dict[str, Any]:
+        """One-call turntable workflow: setup, animate, and render."""
+
+        params: dict[str, Any] = {
+            "output_path": output_path,
+            "object_name": object_name,
+            "frame_start": frame_start,
+            "frame_end": frame_end,
+            "rotations": rotations,
+            "axis": axis,
+            "setup_studio": setup_studio,
+            "primitive": primitive,
+            "size": size,
+            "add_ground": add_ground,
+            "resolution_x": resolution_x,
+            "resolution_y": resolution_y,
+        }
+        if engine is not None:
+            params["engine"] = engine
+        if samples is not None:
+            params["samples"] = samples
+        return client.call("workflow_turntable_render", params)
+
     @server.tool(name="render_still")
     def render_still(
         filepath: str,

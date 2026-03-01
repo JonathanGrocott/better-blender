@@ -46,6 +46,11 @@ This project aligns MCP tool design with Blender's API organization described in
 - Rendering: `render_still`, `render_animation`
 - Import/export: `import_file`, `export_file`
 
+## High-level workflows
+- `workflow_setup_studio`: subject provisioning, camera placement, and three-point lighting.
+- `workflow_create_turntable`: frame range setup and rotation keyframe generation.
+- `workflow_turntable_render`: one-call setup + animation + render pipeline.
+
 ## Animation and rigging workflows
 - `keyframe_transform`, `insert_keyframe`, `list_animation_data`, `clear_animation_data`
 - `add_modifier`, `list_modifiers`, `remove_modifier`, `create_geometry_nodes_modifier`, `list_geometry_nodes`, `add_geometry_node`, `link_geometry_nodes`, `add_geometry_input`, `list_geometry_inputs`, `set_geometry_input`
