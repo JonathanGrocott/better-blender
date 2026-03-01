@@ -42,6 +42,7 @@ class BridgeRuntime:
     port: int
     token: str
     timeout_seconds: float
+    allow_unsafe_code: bool = False
     running: bool = False
     server: socketserver.ThreadingTCPServer | None = None
     thread: threading.Thread | None = None
@@ -225,6 +226,106 @@ def _require_view_layer(name: str | None) -> bpy.types.ViewLayer:
     if view_layer is None:
         raise ValueError(f"View layer not found: {name}")
     return view_layer
+
+
+def _require_modifier(obj: bpy.types.Object, modifier_name: Any) -> bpy.types.Modifier:
+    if not isinstance(modifier_name, str) or not modifier_name:
+        raise ValueError("modifier_name must be a non-empty string")
+
+    modifier = obj.modifiers.get(modifier_name)
+    if modifier is None:
+        raise ValueError(f"Modifier not found: {modifier_name}")
+    return modifier
+
+
+def _ensure_geometry_nodes_group(modifier: bpy.types.Modifier) -> bpy.types.NodeTree:
+    node_group = modifier.node_group
+    if node_group is None:
+        node_group = bpy.data.node_groups.new(name=f"{modifier.name}Tree", type="GeometryNodeTree")
+        modifier.node_group = node_group
+
+    nodes = node_group.nodes
+    links = node_group.links
+
+    group_input = nodes.get("Group Input")
+    if group_input is None:
+        group_input = nodes.new("NodeGroupInput")
+
+    group_output = nodes.get("Group Output")
+    if group_output is None:
+        group_output = nodes.new("NodeGroupOutput")
+
+    if hasattr(node_group, "interface") and not node_group.interface.items_tree:
+        node_group.interface.new_socket(
+            name="Geometry",
+            in_out="INPUT",
+            socket_type="NodeSocketGeometry",
+        )
+        node_group.interface.new_socket(
+            name="Geometry",
+            in_out="OUTPUT",
+            socket_type="NodeSocketGeometry",
+        )
+    elif not hasattr(node_group, "interface"):
+        if not node_group.inputs:
+            node_group.inputs.new("NodeSocketGeometry", "Geometry")
+        if not node_group.outputs:
+            node_group.outputs.new("NodeSocketGeometry", "Geometry")
+
+    if (
+        "Geometry" in group_input.outputs
+        and "Geometry" in group_output.inputs
+        and not any(
+            link.from_socket == group_input.outputs["Geometry"]
+            and link.to_socket == group_output.inputs["Geometry"]
+            for link in links
+        )
+    ):
+        links.new(group_input.outputs["Geometry"], group_output.inputs["Geometry"])
+
+    return node_group
+
+
+def _require_node_tree(scene: bpy.types.Scene) -> bpy.types.NodeTree:
+    tree = getattr(scene, "node_tree", None)
+    if tree is not None:
+        return tree
+
+    group_tree = getattr(scene, "compositing_node_group", None)
+    if group_tree is not None:
+        return group_tree
+
+    raise ValueError("Compositor nodes are disabled. Call enable_compositor first.")
+
+
+def _get_or_create_compositor_tree(scene: bpy.types.Scene) -> bpy.types.NodeTree:
+    tree = getattr(scene, "node_tree", None)
+    if tree is not None:
+        return tree
+
+    group_tree = getattr(scene, "compositing_node_group", None)
+    if group_tree is not None:
+        return group_tree
+
+    created = bpy.data.node_groups.new(name=f"{scene.name}_Compositor", type="CompositorNodeTree")
+    if hasattr(scene, "compositing_node_group"):
+        scene.compositing_node_group = created
+    return created
+
+
+def _iter_action_fcurves(action: bpy.types.Action) -> list[bpy.types.FCurve]:
+    if hasattr(action, "fcurves"):
+        return list(action.fcurves)
+
+    fcurves: list[bpy.types.FCurve] = []
+    if hasattr(action, "layers"):
+        for layer in action.layers:
+            for strip in layer.strips:
+                if hasattr(strip, "channelbags"):
+                    for channelbag in strip.channelbags:
+                        if hasattr(channelbag, "fcurves"):
+                            fcurves.extend(channelbag.fcurves)
+    return fcurves
 
 
 def _dispatch_command(method: str, params: dict[str, Any]) -> dict[str, Any]:
@@ -475,8 +576,10 @@ def _dispatch_command(method: str, params: dict[str, Any]) -> dict[str, Any]:
         if animation_data is None or animation_data.action is None:
             return {"name": obj.name, "has_animation": False, "action": None, "fcurves": []}
 
+        action = animation_data.action
+        curves = _iter_action_fcurves(action)
         fcurves = []
-        for fcurve in animation_data.action.fcurves:
+        for fcurve in curves:
             fcurves.append(
                 {
                     "data_path": fcurve.data_path,
@@ -488,8 +591,205 @@ def _dispatch_command(method: str, params: dict[str, Any]) -> dict[str, Any]:
         return {
             "name": obj.name,
             "has_animation": True,
-            "action": animation_data.action.name,
+            "action": action.name,
             "fcurves": fcurves,
+        }
+
+    if method == "list_actions":
+        actions = [{"name": action.name, "users": action.users} for action in bpy.data.actions]
+        return {"actions": actions, "count": len(actions)}
+
+    if method == "create_action":
+        action_name = params.get("name")
+        object_name = params.get("object_name")
+        set_active = bool(params.get("set_active", True))
+
+        if not isinstance(action_name, str) or not action_name:
+            raise ValueError("name must be a non-empty string")
+
+        action = bpy.data.actions.get(action_name)
+        if action is None:
+            action = bpy.data.actions.new(name=action_name)
+
+        if isinstance(object_name, str) and object_name:
+            obj = _require_object(object_name)
+            if obj.animation_data is None:
+                obj.animation_data_create()
+            if set_active:
+                obj.animation_data.action = action
+
+        return {"action": {"name": action.name, "users": action.users}}
+
+    if method == "set_active_action":
+        object_name = params.get("object_name")
+        action_name = params.get("action_name")
+
+        obj = _require_object(object_name)
+        if not isinstance(action_name, str) or not action_name:
+            raise ValueError("action_name must be a non-empty string")
+
+        action = bpy.data.actions.get(action_name)
+        if action is None:
+            raise ValueError(f"Action not found: {action_name}")
+
+        if obj.animation_data is None:
+            obj.animation_data_create()
+        obj.animation_data.action = action
+        return {"object_name": obj.name, "active_action": action.name}
+
+    if method == "push_down_action":
+        object_name = params.get("object_name")
+        obj = _require_object(object_name)
+
+        if obj.animation_data is None or obj.animation_data.action is None:
+            raise ValueError(f"Object {obj.name} has no active action")
+
+        action = obj.animation_data.action
+        track = obj.animation_data.nla_tracks.new()
+        strip_start = int(bpy.context.scene.frame_current)
+        strip = track.strips.new(action.name, strip_start, action)
+        obj.animation_data.action = None
+
+        return {
+            "object_name": obj.name,
+            "pushed_action": action.name,
+            "track": track.name,
+            "strip": strip.name,
+        }
+
+    if method == "clear_animation_data":
+        object_name = params.get("object_name")
+        obj = _require_object(object_name)
+        obj.animation_data_clear()
+        return {"object_name": obj.name, "cleared": True}
+
+    if method == "create_geometry_nodes_modifier":
+        object_name = params.get("object_name")
+        modifier_name = params.get("modifier_name", "GeometryNodes")
+
+        obj = _require_object(object_name)
+        if not isinstance(modifier_name, str) or not modifier_name:
+            raise ValueError("modifier_name must be a non-empty string")
+
+        modifier = obj.modifiers.get(modifier_name)
+        if modifier is None:
+            modifier = obj.modifiers.new(name=modifier_name, type="NODES")
+        elif modifier.type != "NODES":
+            raise ValueError(
+                f"Modifier {modifier_name} exists but is not a geometry nodes modifier"
+            )
+
+        node_group = _ensure_geometry_nodes_group(modifier)
+        return {
+            "object_name": obj.name,
+            "modifier": {"name": modifier.name, "type": modifier.type},
+            "node_group": node_group.name,
+        }
+
+    if method == "list_geometry_nodes":
+        object_name = params.get("object_name")
+        modifier_name = params.get("modifier_name", "GeometryNodes")
+        obj = _require_object(object_name)
+        modifier = _require_modifier(obj, modifier_name)
+
+        if modifier.type != "NODES" or modifier.node_group is None:
+            raise ValueError(
+                f"Modifier {modifier.name} is not configured with a geometry node tree"
+            )
+
+        node_group = modifier.node_group
+        nodes = [{"name": node.name, "type": node.bl_idname} for node in node_group.nodes]
+        links = []
+        for link in node_group.links:
+            links.append(
+                {
+                    "from_node": link.from_node.name,
+                    "from_socket": link.from_socket.name,
+                    "to_node": link.to_node.name,
+                    "to_socket": link.to_socket.name,
+                }
+            )
+
+        return {
+            "object_name": obj.name,
+            "modifier_name": modifier.name,
+            "node_group": node_group.name,
+            "nodes": nodes,
+            "links": links,
+        }
+
+    if method == "add_geometry_node":
+        object_name = params.get("object_name")
+        modifier_name = params.get("modifier_name", "GeometryNodes")
+        node_type = params.get("node_type")
+        node_name = params.get("node_name")
+
+        obj = _require_object(object_name)
+        modifier = _require_modifier(obj, modifier_name)
+
+        if modifier.type != "NODES":
+            raise ValueError(f"Modifier {modifier.name} is not a geometry nodes modifier")
+        if not isinstance(node_type, str) or not node_type:
+            raise ValueError("node_type must be a non-empty string")
+
+        node_group = _ensure_geometry_nodes_group(modifier)
+        node = node_group.nodes.new(node_type)
+        if isinstance(node_name, str) and node_name:
+            node.name = node_name
+
+        return {
+            "object_name": obj.name,
+            "modifier_name": modifier.name,
+            "node": {"name": node.name, "type": node.bl_idname},
+        }
+
+    if method == "link_geometry_nodes":
+        object_name = params.get("object_name")
+        modifier_name = params.get("modifier_name", "GeometryNodes")
+        from_node_name = params.get("from_node")
+        from_socket_name = params.get("from_socket")
+        to_node_name = params.get("to_node")
+        to_socket_name = params.get("to_socket")
+
+        obj = _require_object(object_name)
+        modifier = _require_modifier(obj, modifier_name)
+        if modifier.type != "NODES":
+            raise ValueError(f"Modifier {modifier.name} is not a geometry nodes modifier")
+
+        for field_name, value in (
+            ("from_node", from_node_name),
+            ("from_socket", from_socket_name),
+            ("to_node", to_node_name),
+            ("to_socket", to_socket_name),
+        ):
+            if not isinstance(value, str) or not value:
+                raise ValueError(f"{field_name} must be a non-empty string")
+
+        node_group = _ensure_geometry_nodes_group(modifier)
+        from_node = node_group.nodes.get(from_node_name)
+        to_node = node_group.nodes.get(to_node_name)
+        if from_node is None:
+            raise ValueError(f"Node not found: {from_node_name}")
+        if to_node is None:
+            raise ValueError(f"Node not found: {to_node_name}")
+
+        from_socket = from_node.outputs.get(from_socket_name)
+        to_socket = to_node.inputs.get(to_socket_name)
+        if from_socket is None:
+            raise ValueError(f"Socket not found: {from_node_name}.{from_socket_name}")
+        if to_socket is None:
+            raise ValueError(f"Socket not found: {to_node_name}.{to_socket_name}")
+
+        node_group.links.new(from_socket, to_socket)
+        return {
+            "object_name": obj.name,
+            "modifier_name": modifier.name,
+            "linked": {
+                "from_node": from_node.name,
+                "from_socket": from_socket.name,
+                "to_node": to_node.name,
+                "to_socket": to_socket.name,
+            },
         }
 
     if method == "add_modifier":
@@ -719,6 +1019,133 @@ def _dispatch_command(method: str, params: dict[str, Any]) -> dict[str, Any]:
 
         return {"object": _serialize_object(light_object)}
 
+    if method == "enable_compositor":
+        scene = bpy.context.scene
+        use_nodes = bool(params.get("use_nodes", True))
+        clear_nodes = bool(params.get("clear_nodes", False))
+        if hasattr(scene, "use_nodes"):
+            scene.use_nodes = use_nodes
+
+        node_tree = _get_or_create_compositor_tree(scene)
+
+        if clear_nodes:
+            node_tree.nodes.clear()
+            render_layers = node_tree.nodes.new("CompositorNodeRLayers")
+            if "Image" in render_layers.outputs:
+                output = node_tree.nodes.new("CompositorNodeOutputFile")
+                node_tree.links.new(render_layers.outputs["Image"], output.inputs[0])
+
+        return {
+            "use_nodes": bool(getattr(scene, "use_nodes", use_nodes)),
+            "nodes_total": len(node_tree.nodes),
+        }
+
+    if method == "list_compositor_nodes":
+        scene = bpy.context.scene
+        node_tree = _require_node_tree(scene)
+        nodes = [{"name": node.name, "type": node.bl_idname} for node in node_tree.nodes]
+        links = []
+        for link in node_tree.links:
+            links.append(
+                {
+                    "from_node": link.from_node.name,
+                    "from_socket": link.from_socket.name,
+                    "to_node": link.to_node.name,
+                    "to_socket": link.to_socket.name,
+                }
+            )
+        return {"nodes": nodes, "links": links, "count": len(nodes)}
+
+    if method == "add_compositor_node":
+        scene = bpy.context.scene
+        node_tree = _require_node_tree(scene)
+
+        node_type = params.get("node_type")
+        node_name = params.get("node_name")
+        if not isinstance(node_type, str) or not node_type:
+            raise ValueError("node_type must be a non-empty string")
+
+        node = node_tree.nodes.new(node_type)
+        if isinstance(node_name, str) and node_name:
+            node.name = node_name
+
+        return {"node": {"name": node.name, "type": node.bl_idname}}
+
+    if method == "link_compositor_nodes":
+        scene = bpy.context.scene
+        node_tree = _require_node_tree(scene)
+
+        from_node_name = params.get("from_node")
+        from_socket_name = params.get("from_socket")
+        to_node_name = params.get("to_node")
+        to_socket_name = params.get("to_socket")
+
+        for field_name, value in (
+            ("from_node", from_node_name),
+            ("from_socket", from_socket_name),
+            ("to_node", to_node_name),
+            ("to_socket", to_socket_name),
+        ):
+            if not isinstance(value, str) or not value:
+                raise ValueError(f"{field_name} must be a non-empty string")
+
+        from_node = node_tree.nodes.get(from_node_name)
+        to_node = node_tree.nodes.get(to_node_name)
+        if from_node is None:
+            raise ValueError(f"Node not found: {from_node_name}")
+        if to_node is None:
+            raise ValueError(f"Node not found: {to_node_name}")
+
+        from_socket = from_node.outputs.get(from_socket_name)
+        to_socket = to_node.inputs.get(to_socket_name)
+        if from_socket is None:
+            raise ValueError(f"Socket not found: {from_node_name}.{from_socket_name}")
+        if to_socket is None:
+            raise ValueError(f"Socket not found: {to_node_name}.{to_socket_name}")
+
+        node_tree.links.new(from_socket, to_socket)
+        return {
+            "linked": {
+                "from_node": from_node.name,
+                "from_socket": from_socket.name,
+                "to_node": to_node.name,
+                "to_socket": to_socket.name,
+            }
+        }
+
+    if method == "set_view_layer_passes":
+        view_layer_name = params.get("view_layer_name")
+        resolved_view_layer_name = view_layer_name if isinstance(view_layer_name, str) else None
+        view_layer = _require_view_layer(resolved_view_layer_name)
+
+        requested_passes = {
+            "use_pass_z": params.get("use_pass_z"),
+            "use_pass_normal": params.get("use_pass_normal"),
+            "use_pass_vector": params.get("use_pass_vector"),
+            "use_pass_diffuse_color": params.get("use_pass_diffuse_color"),
+            "use_pass_glossy_color": params.get("use_pass_glossy_color"),
+            "use_pass_emit": params.get("use_pass_emit"),
+            "use_pass_ambient_occlusion": params.get("use_pass_ambient_occlusion"),
+        }
+
+        applied: dict[str, bool] = {}
+        unsupported: list[str] = []
+        for attr_name, raw_value in requested_passes.items():
+            if not isinstance(raw_value, bool):
+                continue
+
+            if hasattr(view_layer, attr_name):
+                setattr(view_layer, attr_name, raw_value)
+                applied[attr_name] = bool(getattr(view_layer, attr_name))
+            else:
+                unsupported.append(attr_name)
+
+        return {
+            "view_layer_name": view_layer.name,
+            "applied": applied,
+            "unsupported": unsupported,
+        }
+
     if method == "render_still":
         filepath = _normalize_path(params.get("filepath"), require_exists=False)
         Path(filepath).parent.mkdir(parents=True, exist_ok=True)
@@ -742,6 +1169,32 @@ def _dispatch_command(method: str, params: dict[str, Any]) -> dict[str, Any]:
         scene.render.filepath = filepath
         bpy.ops.render.render(write_still=True)
         return {"rendered": True, "filepath": filepath, "engine": scene.render.engine}
+
+    if method == "render_animation":
+        filepath = _normalize_path(params.get("filepath"), require_exists=False)
+        Path(filepath).parent.mkdir(parents=True, exist_ok=True)
+
+        scene = bpy.context.scene
+        engine = params.get("engine")
+        frame_start = params.get("frame_start")
+        frame_end = params.get("frame_end")
+
+        if isinstance(engine, str) and engine:
+            scene.render.engine = engine
+        if isinstance(frame_start, int):
+            scene.frame_start = frame_start
+        if isinstance(frame_end, int):
+            scene.frame_end = frame_end
+
+        scene.render.filepath = filepath
+        bpy.ops.render.render(animation=True)
+        return {
+            "rendered": True,
+            "filepath": filepath,
+            "engine": scene.render.engine,
+            "frame_start": scene.frame_start,
+            "frame_end": scene.frame_end,
+        }
 
     if method == "import_file":
         filepath = _normalize_path(params.get("filepath"), require_exists=True)
@@ -901,8 +1354,8 @@ def _dispatch_command(method: str, params: dict[str, Any]) -> dict[str, Any]:
         }
 
     if method == "execute_code":
-        prefs = _get_addon_prefs()
-        if not prefs.allow_unsafe_code:
+        allow_unsafe_code = _RUNTIME.allow_unsafe_code if _RUNTIME is not None else False
+        if not allow_unsafe_code:
             raise ValueError("Unsafe code execution is disabled in add-on preferences")
 
         code = params.get("code")
@@ -941,6 +1394,15 @@ def _supported_methods() -> list[str]:
         "keyframe_transform",
         "insert_keyframe",
         "list_animation_data",
+        "list_actions",
+        "create_action",
+        "set_active_action",
+        "push_down_action",
+        "clear_animation_data",
+        "create_geometry_nodes_modifier",
+        "list_geometry_nodes",
+        "add_geometry_node",
+        "link_geometry_nodes",
         "add_modifier",
         "list_modifiers",
         "apply_modifier",
@@ -953,7 +1415,13 @@ def _supported_methods() -> list[str]:
         "create_camera",
         "set_active_camera",
         "create_light",
+        "enable_compositor",
+        "list_compositor_nodes",
+        "add_compositor_node",
+        "link_compositor_nodes",
+        "set_view_layer_passes",
         "render_still",
+        "render_animation",
         "import_file",
         "export_file",
         "list_collections",
@@ -1020,17 +1488,36 @@ def _get_addon_prefs(context: bpy.types.Context | None = None) -> BetterBlenderP
 
 
 def start_bridge(context: bpy.types.Context | None = None) -> None:
+    prefs = _get_addon_prefs(context)
+    start_bridge_with_config(
+        host=prefs.host,
+        port=prefs.port,
+        token=prefs.token,
+        timeout_seconds=prefs.timeout_seconds,
+        allow_unsafe_code=prefs.allow_unsafe_code,
+        register_timer=True,
+    )
+
+
+def start_bridge_with_config(
+    host: str,
+    port: int,
+    token: str,
+    timeout_seconds: float = 30.0,
+    allow_unsafe_code: bool = False,
+    register_timer: bool = True,
+) -> None:
     global _RUNTIME
 
     if _RUNTIME is not None and _RUNTIME.running:
         return
 
-    prefs = _get_addon_prefs(context)
     runtime = BridgeRuntime(
-        host=prefs.host,
-        port=prefs.port,
-        token=prefs.token,
-        timeout_seconds=prefs.timeout_seconds,
+        host=host,
+        port=port,
+        token=token,
+        timeout_seconds=timeout_seconds,
+        allow_unsafe_code=allow_unsafe_code,
         running=True,
         command_queue=queue.Queue(),
     )
@@ -1045,7 +1532,8 @@ def start_bridge(context: bpy.types.Context | None = None) -> None:
     runtime.thread = thread
 
     _RUNTIME = runtime
-    _register_timer_if_needed()
+    if register_timer:
+        _register_timer_if_needed()
     thread.start()
 
 

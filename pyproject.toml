@@ -42,8 +42,11 @@ select = ["E", "F", "I", "B", "UP", "N"]
 ignore = []
 
 [tool.pytest.ini_options]
-addopts = "-q"
+addopts = "-q -m 'not integration'"
 testpaths = ["tests"]
+markers = [
+  "integration: end-to-end tests that require a Blender executable",
+]
 
 [tool.mypy]
 python_version = "3.11"

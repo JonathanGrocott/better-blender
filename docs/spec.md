@@ -73,6 +73,15 @@ Failure:
 - `keyframe_transform`
 - `insert_keyframe`
 - `list_animation_data`
+- `list_actions`
+- `create_action`
+- `set_active_action`
+- `push_down_action`
+- `clear_animation_data`
+- `create_geometry_nodes_modifier`
+- `list_geometry_nodes`
+- `add_geometry_node`
+- `link_geometry_nodes`
 - `add_modifier`
 - `list_modifiers`
 - `apply_modifier`
@@ -85,7 +94,13 @@ Failure:
 - `create_camera`
 - `set_active_camera`
 - `create_light`
+- `enable_compositor`
+- `list_compositor_nodes`
+- `add_compositor_node`
+- `link_compositor_nodes`
+- `set_view_layer_passes`
 - `render_still`
+- `render_animation`
 - `import_file`
 - `export_file`
 - `execute_code` (requires add-on preference `allow_unsafe_code=true`)

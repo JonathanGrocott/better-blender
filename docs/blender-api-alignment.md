@@ -16,6 +16,7 @@ This project aligns MCP tool design with Blender's API organization described in
 - `set_active_camera`
 - `set_active_view_layer`
 - `set_collection_visibility`
+- `set_view_layer_passes`
 
 ## Data-block workflows (`bpy.data`)
 - `get_object_info`
@@ -26,26 +27,31 @@ This project aligns MCP tool design with Blender's API organization described in
 - `create_collection`
 - `add_object_to_collection`
 - `remove_object_from_collection`
+- `list_actions`
+- `create_action`
+- `set_active_action`
+- `push_down_action`
 
 ## Operator workflows (`bpy.ops`)
 - File lifecycle: `new_scene`, `open_blend`, `save_blend`
 - Mesh/object actions: `create_primitive`, `delete_object`, `duplicate_object`, `set_object_transform`
 - Modifier actions: `apply_modifier`
-- Rendering: `render_still`
+- Compositor actions: `enable_compositor`, `add_compositor_node`, `link_compositor_nodes`
+- Rendering: `render_still`, `render_animation`
 - Import/export: `import_file`, `export_file`
 
 ## Animation and rigging workflows
-- `keyframe_transform`, `insert_keyframe`, `list_animation_data`
-- `add_modifier`, `list_modifiers`, `remove_modifier`
+- `keyframe_transform`, `insert_keyframe`, `list_animation_data`, `clear_animation_data`
+- `add_modifier`, `list_modifiers`, `remove_modifier`, `create_geometry_nodes_modifier`, `list_geometry_nodes`, `add_geometry_node`, `link_geometry_nodes`
 - `add_constraint`, `list_constraints`, `remove_constraint`
 
 ## Advanced scripting
 - `execute_blender_code` -> `execute_code` bridge method (explicitly gated behind add-on preference `allow_unsafe_code`)
 
 ## Current Gaps vs Full Blender Surface
-- Geometry nodes node-tree authoring and advanced modifier parameter coverage.
+- Advanced geometry nodes graph editing utilities (group interfaces, socket type coercion, parameter mapping helpers).
 - Rigging/bones, armature pose workflows, and IK setup helpers.
-- Compositor nodes and render passes.
+- Deep compositor pipelines (multi-branch templates, cryptomatte/AOV workflows, and output routing helpers).
 - Cross-scene collection linking and scene instancing helpers.
 - Asset browser operations.
 

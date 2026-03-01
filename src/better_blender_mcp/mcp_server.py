@@ -276,6 +276,111 @@ def create_server(client: BlenderBridgeClient) -> Any:
 
         return client.call("list_animation_data", {"name": name})
 
+    @server.tool(name="list_actions")
+    def list_actions() -> dict[str, Any]:
+        """List actions in the .blend file."""
+
+        return client.call("list_actions")
+
+    @server.tool(name="create_action")
+    def create_action(
+        name: str,
+        object_name: str | None = None,
+        set_active: bool = True,
+    ) -> dict[str, Any]:
+        """Create an action and optionally assign it to an object."""
+
+        params: dict[str, Any] = {"name": name, "set_active": set_active}
+        if object_name is not None:
+            params["object_name"] = object_name
+        return client.call("create_action", params)
+
+    @server.tool(name="set_active_action")
+    def set_active_action(object_name: str, action_name: str) -> dict[str, Any]:
+        """Set an object's active action."""
+
+        return client.call(
+            "set_active_action",
+            {"object_name": object_name, "action_name": action_name},
+        )
+
+    @server.tool(name="push_down_action")
+    def push_down_action(object_name: str) -> dict[str, Any]:
+        """Push active action to NLA track and clear active action."""
+
+        return client.call("push_down_action", {"object_name": object_name})
+
+    @server.tool(name="clear_animation_data")
+    def clear_animation_data(object_name: str) -> dict[str, Any]:
+        """Clear all animation data from an object."""
+
+        return client.call("clear_animation_data", {"object_name": object_name})
+
+    @server.tool(name="create_geometry_nodes_modifier")
+    def create_geometry_nodes_modifier(
+        object_name: str,
+        modifier_name: str = "GeometryNodes",
+    ) -> dict[str, Any]:
+        """Create or return a geometry nodes modifier and node tree."""
+
+        return client.call(
+            "create_geometry_nodes_modifier",
+            {"object_name": object_name, "modifier_name": modifier_name},
+        )
+
+    @server.tool(name="list_geometry_nodes")
+    def list_geometry_nodes(
+        object_name: str,
+        modifier_name: str = "GeometryNodes",
+    ) -> dict[str, Any]:
+        """List geometry nodes and links for a modifier."""
+
+        return client.call(
+            "list_geometry_nodes",
+            {"object_name": object_name, "modifier_name": modifier_name},
+        )
+
+    @server.tool(name="add_geometry_node")
+    def add_geometry_node(
+        object_name: str,
+        node_type: str,
+        modifier_name: str = "GeometryNodes",
+        node_name: str | None = None,
+    ) -> dict[str, Any]:
+        """Add a node to a geometry node tree."""
+
+        params: dict[str, Any] = {
+            "object_name": object_name,
+            "modifier_name": modifier_name,
+            "node_type": node_type,
+        }
+        if node_name is not None:
+            params["node_name"] = node_name
+        return client.call("add_geometry_node", params)
+
+    @server.tool(name="link_geometry_nodes")
+    def link_geometry_nodes(
+        object_name: str,
+        from_node: str,
+        from_socket: str,
+        to_node: str,
+        to_socket: str,
+        modifier_name: str = "GeometryNodes",
+    ) -> dict[str, Any]:
+        """Create a link between geometry nodes sockets."""
+
+        return client.call(
+            "link_geometry_nodes",
+            {
+                "object_name": object_name,
+                "modifier_name": modifier_name,
+                "from_node": from_node,
+                "from_socket": from_socket,
+                "to_node": to_node,
+                "to_socket": to_socket,
+            },
+        )
+
     @server.tool(name="add_modifier")
     def add_modifier(
         object_name: str,
@@ -434,6 +539,81 @@ def create_server(client: BlenderBridgeClient) -> Any:
             },
         )
 
+    @server.tool(name="enable_compositor")
+    def enable_compositor(use_nodes: bool = True, clear_nodes: bool = False) -> dict[str, Any]:
+        """Enable compositor nodes and optionally reset node tree."""
+
+        return client.call(
+            "enable_compositor",
+            {"use_nodes": use_nodes, "clear_nodes": clear_nodes},
+        )
+
+    @server.tool(name="list_compositor_nodes")
+    def list_compositor_nodes() -> dict[str, Any]:
+        """List compositor nodes and links."""
+
+        return client.call("list_compositor_nodes")
+
+    @server.tool(name="add_compositor_node")
+    def add_compositor_node(node_type: str, node_name: str | None = None) -> dict[str, Any]:
+        """Add a compositor node by Blender node type id."""
+
+        params: dict[str, Any] = {"node_type": node_type}
+        if node_name is not None:
+            params["node_name"] = node_name
+        return client.call("add_compositor_node", params)
+
+    @server.tool(name="link_compositor_nodes")
+    def link_compositor_nodes(
+        from_node: str,
+        from_socket: str,
+        to_node: str,
+        to_socket: str,
+    ) -> dict[str, Any]:
+        """Link sockets between two compositor nodes."""
+
+        return client.call(
+            "link_compositor_nodes",
+            {
+                "from_node": from_node,
+                "from_socket": from_socket,
+                "to_node": to_node,
+                "to_socket": to_socket,
+            },
+        )
+
+    @server.tool(name="set_view_layer_passes")
+    def set_view_layer_passes(
+        view_layer_name: str | None = None,
+        use_pass_z: bool | None = None,
+        use_pass_normal: bool | None = None,
+        use_pass_vector: bool | None = None,
+        use_pass_diffuse_color: bool | None = None,
+        use_pass_glossy_color: bool | None = None,
+        use_pass_emit: bool | None = None,
+        use_pass_ambient_occlusion: bool | None = None,
+    ) -> dict[str, Any]:
+        """Configure common render passes on a view layer."""
+
+        params: dict[str, Any] = {}
+        if view_layer_name is not None:
+            params["view_layer_name"] = view_layer_name
+        if use_pass_z is not None:
+            params["use_pass_z"] = use_pass_z
+        if use_pass_normal is not None:
+            params["use_pass_normal"] = use_pass_normal
+        if use_pass_vector is not None:
+            params["use_pass_vector"] = use_pass_vector
+        if use_pass_diffuse_color is not None:
+            params["use_pass_diffuse_color"] = use_pass_diffuse_color
+        if use_pass_glossy_color is not None:
+            params["use_pass_glossy_color"] = use_pass_glossy_color
+        if use_pass_emit is not None:
+            params["use_pass_emit"] = use_pass_emit
+        if use_pass_ambient_occlusion is not None:
+            params["use_pass_ambient_occlusion"] = use_pass_ambient_occlusion
+        return client.call("set_view_layer_passes", params)
+
     @server.tool(name="render_still")
     def render_still(
         filepath: str,
@@ -455,6 +635,24 @@ def create_server(client: BlenderBridgeClient) -> Any:
             params["samples"] = samples
 
         return client.call("render_still", params)
+
+    @server.tool(name="render_animation")
+    def render_animation(
+        filepath: str,
+        engine: str | None = None,
+        frame_start: int | None = None,
+        frame_end: int | None = None,
+    ) -> dict[str, Any]:
+        """Render animation frames to disk sequence."""
+
+        params: dict[str, Any] = {"filepath": filepath}
+        if engine is not None:
+            params["engine"] = engine
+        if frame_start is not None:
+            params["frame_start"] = frame_start
+        if frame_end is not None:
+            params["frame_end"] = frame_end
+        return client.call("render_animation", params)
 
     @server.tool(name="import_file")
     def import_file(filepath: str, file_type: str | None = None) -> dict[str, Any]:
