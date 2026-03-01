@@ -11,9 +11,9 @@ This repository now includes:
   - Scene/File: `new_scene`, `open_blend`, `save_blend`, `get_scene_info`, `set_timeline`
   - Collections/View Layers: `list_collections`, `create_collection`, `add_object_to_collection`, `remove_object_from_collection`, `list_view_layers`, `set_active_view_layer`, `set_collection_visibility`
   - Objects: `list_objects`, `get_object_info`, `create_primitive`, `delete_object`, `set_object_transform`, `duplicate_object`
-  - Animation/Actions: `keyframe_transform`, `insert_keyframe`, `list_animation_data`, `list_actions`, `create_action`, `set_active_action`, `push_down_action`, `clear_animation_data`
+  - Animation/Actions: `keyframe_transform`, `insert_keyframe`, `list_animation_data`, `list_actions`, `create_action`, `set_active_action`, `push_down_action`, `clear_animation_data`, `duplicate_action`, `delete_action`, `list_nla_tracks`, `create_nla_strip`, `set_nla_strip`, `remove_nla_strip`
   - Modifiers/Constraints: `add_modifier`, `list_modifiers`, `apply_modifier`, `remove_modifier`, `add_constraint`, `list_constraints`, `remove_constraint`
-  - Geometry Nodes: `create_geometry_nodes_modifier`, `list_geometry_nodes`, `add_geometry_node`, `link_geometry_nodes`
+  - Geometry Nodes: `create_geometry_nodes_modifier`, `list_geometry_nodes`, `add_geometry_node`, `link_geometry_nodes`, `add_geometry_input`, `list_geometry_inputs`, `set_geometry_input`
   - Materials: `create_material`, `assign_material`
   - Camera/Light: `create_camera`, `set_active_camera`, `create_light`
   - Compositor/Passes: `enable_compositor`, `list_compositor_nodes`, `add_compositor_node`, `link_compositor_nodes`, `set_view_layer_passes`

@@ -328,6 +328,87 @@ def _iter_action_fcurves(action: bpy.types.Action) -> list[bpy.types.FCurve]:
     return fcurves
 
 
+def _require_action(name: Any) -> bpy.types.Action:
+    if not isinstance(name, str) or not name:
+        raise ValueError("action name must be a non-empty string")
+
+    action = bpy.data.actions.get(name)
+    if action is None:
+        raise ValueError(f"Action not found: {name}")
+    return action
+
+
+def _require_nla_track(obj: bpy.types.Object, track_name: Any) -> bpy.types.NlaTrack:
+    if obj.animation_data is None:
+        raise ValueError(f"Object {obj.name} has no animation data")
+
+    if not isinstance(track_name, str) or not track_name:
+        raise ValueError("track_name must be a non-empty string")
+
+    track = obj.animation_data.nla_tracks.get(track_name)
+    if track is None:
+        raise ValueError(f"NLA track not found: {track_name}")
+    return track
+
+
+def _require_nla_strip(track: bpy.types.NlaTrack, strip_name: Any) -> bpy.types.NlaStrip:
+    if not isinstance(strip_name, str) or not strip_name:
+        raise ValueError("strip_name must be a non-empty string")
+
+    strip = track.strips.get(strip_name)
+    if strip is None:
+        raise ValueError(f"NLA strip not found: {strip_name}")
+    return strip
+
+
+def _serialize_nla_strip(strip: bpy.types.NlaStrip) -> dict[str, Any]:
+    action_name = strip.action.name if strip.action is not None else None
+    return {
+        "name": strip.name,
+        "action": action_name,
+        "frame_start": float(strip.frame_start),
+        "frame_end": float(strip.frame_end),
+        "action_frame_start": float(strip.action_frame_start),
+        "action_frame_end": float(strip.action_frame_end),
+        "scale": float(strip.scale),
+        "repeat": float(strip.repeat),
+        "mute": bool(strip.mute),
+    }
+
+
+def _resolve_geometry_input_identifier(
+    node_group: bpy.types.NodeTree,
+    input_name_or_identifier: Any,
+) -> tuple[str, str]:
+    if not isinstance(input_name_or_identifier, str) or not input_name_or_identifier:
+        raise ValueError("input_name_or_identifier must be a non-empty string")
+
+    if hasattr(node_group, "interface"):
+        items = [item for item in node_group.interface.items_tree if item.item_type == "SOCKET"]
+        for item in items:
+            if item.in_out != "INPUT":
+                continue
+            if getattr(item, "identifier", "") == input_name_or_identifier:
+                return item.identifier, item.name
+
+        for item in items:
+            if item.in_out != "INPUT":
+                continue
+            if item.name == input_name_or_identifier:
+                return item.identifier, item.name
+    else:
+        for socket in node_group.inputs:
+            identifier = socket.identifier if hasattr(socket, "identifier") else socket.name
+            if identifier == input_name_or_identifier:
+                return identifier, socket.name
+        for socket in node_group.inputs:
+            if socket.name == input_name_or_identifier:
+                identifier = socket.identifier if hasattr(socket, "identifier") else socket.name
+                return identifier, socket.name
+
+    raise ValueError(f"Geometry input not found: {input_name_or_identifier}")
+
+
 def _dispatch_command(method: str, params: dict[str, Any]) -> dict[str, Any]:
     if method == "health":
         return {
@@ -663,6 +744,127 @@ def _dispatch_command(method: str, params: dict[str, Any]) -> dict[str, Any]:
         obj.animation_data_clear()
         return {"object_name": obj.name, "cleared": True}
 
+    if method == "duplicate_action":
+        action_name = params.get("action_name")
+        new_name = params.get("new_name")
+        action = _require_action(action_name)
+
+        if not isinstance(new_name, str) or not new_name:
+            new_name = f"{action.name}_copy"
+
+        copy = action.copy()
+        copy.name = new_name
+        return {"action": {"name": copy.name, "users": copy.users}}
+
+    if method == "delete_action":
+        action_name = params.get("action_name")
+        force = bool(params.get("force", False))
+        action = _require_action(action_name)
+
+        if action.users > 0 and not force:
+            raise ValueError(
+                f"Action {action.name} has {action.users} users. Set force=true to remove."
+            )
+
+        if force:
+            action.user_clear()
+        bpy.data.actions.remove(action)
+        return {"deleted_action": action_name}
+
+    if method == "list_nla_tracks":
+        object_name = params.get("object_name")
+        obj = _require_object(object_name)
+        if obj.animation_data is None:
+            return {"object_name": obj.name, "tracks": [], "count": 0}
+
+        tracks = []
+        for track in obj.animation_data.nla_tracks:
+            strips = [_serialize_nla_strip(strip) for strip in track.strips]
+            tracks.append(
+                {
+                    "name": track.name,
+                    "mute": bool(track.mute),
+                    "is_solo": bool(track.is_solo),
+                    "strips": strips,
+                }
+            )
+        return {"object_name": obj.name, "tracks": tracks, "count": len(tracks)}
+
+    if method == "create_nla_strip":
+        object_name = params.get("object_name")
+        action_name = params.get("action_name")
+        track_name = params.get("track_name")
+        strip_name = params.get("strip_name")
+        frame_start = params.get("frame_start")
+
+        obj = _require_object(object_name)
+        action = _require_action(action_name)
+        if obj.animation_data is None:
+            obj.animation_data_create()
+
+        if isinstance(track_name, str) and track_name:
+            track = obj.animation_data.nla_tracks.get(track_name)
+            if track is None:
+                track = obj.animation_data.nla_tracks.new()
+                track.name = track_name
+        else:
+            track = obj.animation_data.nla_tracks.new()
+
+        if not isinstance(frame_start, (int, float)):
+            frame_start = float(bpy.context.scene.frame_current)
+
+        new_strip_name = strip_name if isinstance(strip_name, str) and strip_name else action.name
+        strip = track.strips.new(new_strip_name, int(frame_start), action)
+
+        return {
+            "object_name": obj.name,
+            "track_name": track.name,
+            "strip": _serialize_nla_strip(strip),
+        }
+
+    if method == "set_nla_strip":
+        object_name = params.get("object_name")
+        track_name = params.get("track_name")
+        strip_name = params.get("strip_name")
+
+        obj = _require_object(object_name)
+        track = _require_nla_track(obj, track_name)
+        strip = _require_nla_strip(track, strip_name)
+
+        if "frame_start" in params and isinstance(params["frame_start"], (int, float)):
+            strip.frame_start = float(params["frame_start"])
+        if "frame_end" in params and isinstance(params["frame_end"], (int, float)):
+            strip.frame_end = float(params["frame_end"])
+        if "action_frame_start" in params and isinstance(
+            params["action_frame_start"], (int, float)
+        ):
+            strip.action_frame_start = float(params["action_frame_start"])
+        if "action_frame_end" in params and isinstance(params["action_frame_end"], (int, float)):
+            strip.action_frame_end = float(params["action_frame_end"])
+        if "scale" in params and isinstance(params["scale"], (int, float)):
+            strip.scale = float(params["scale"])
+        if "repeat" in params and isinstance(params["repeat"], (int, float)):
+            strip.repeat = float(params["repeat"])
+        if "mute" in params and isinstance(params["mute"], bool):
+            strip.mute = params["mute"]
+
+        return {
+            "object_name": obj.name,
+            "track_name": track.name,
+            "strip": _serialize_nla_strip(strip),
+        }
+
+    if method == "remove_nla_strip":
+        object_name = params.get("object_name")
+        track_name = params.get("track_name")
+        strip_name = params.get("strip_name")
+
+        obj = _require_object(object_name)
+        track = _require_nla_track(obj, track_name)
+        strip = _require_nla_strip(track, strip_name)
+        track.strips.remove(strip)
+        return {"object_name": obj.name, "track_name": track.name, "removed_strip": strip_name}
+
     if method == "create_geometry_nodes_modifier":
         object_name = params.get("object_name")
         modifier_name = params.get("modifier_name", "GeometryNodes")
@@ -789,6 +991,181 @@ def _dispatch_command(method: str, params: dict[str, Any]) -> dict[str, Any]:
                 "from_socket": from_socket.name,
                 "to_node": to_node.name,
                 "to_socket": to_socket.name,
+            },
+        }
+
+    if method == "add_geometry_input":
+        object_name = params.get("object_name")
+        modifier_name = params.get("modifier_name", "GeometryNodes")
+        input_name = params.get("input_name")
+        socket_type = params.get("socket_type", "NodeSocketFloat")
+        default_value = params.get("default_value")
+
+        obj = _require_object(object_name)
+        modifier = _require_modifier(obj, modifier_name)
+        if modifier.type != "NODES":
+            raise ValueError(f"Modifier {modifier.name} is not a geometry nodes modifier")
+        if not isinstance(input_name, str) or not input_name:
+            raise ValueError("input_name must be a non-empty string")
+        if not isinstance(socket_type, str) or not socket_type:
+            raise ValueError("socket_type must be a non-empty string")
+
+        node_group = _ensure_geometry_nodes_group(modifier)
+        if hasattr(node_group, "interface"):
+            socket = node_group.interface.new_socket(
+                name=input_name,
+                in_out="INPUT",
+                socket_type=socket_type,
+            )
+            identifier = socket.identifier
+            resolved_socket_type = socket.socket_type
+        else:
+            socket = node_group.inputs.new(socket_type, input_name)
+            identifier = socket.identifier if hasattr(socket, "identifier") else socket.name
+            resolved_socket_type = (
+                socket.bl_socket_idname if hasattr(socket, "bl_socket_idname") else socket_type
+            )
+
+        if default_value is not None:
+            stored_value: Any
+            if isinstance(default_value, list):
+                stored_value = tuple(default_value)
+            else:
+                stored_value = default_value
+            modifier[identifier] = stored_value
+
+        current = modifier.get(identifier)
+        if hasattr(current, "__iter__") and not isinstance(current, (str, bytes, dict)):
+            try:
+                current = list(current)
+            except TypeError:
+                pass
+
+        return {
+            "object_name": obj.name,
+            "modifier_name": modifier.name,
+            "input": {
+                "name": input_name,
+                "identifier": identifier,
+                "socket_type": resolved_socket_type,
+                "value": current,
+            },
+        }
+
+    if method == "list_geometry_inputs":
+        object_name = params.get("object_name")
+        modifier_name = params.get("modifier_name", "GeometryNodes")
+        obj = _require_object(object_name)
+        modifier = _require_modifier(obj, modifier_name)
+
+        if modifier.type != "NODES" or modifier.node_group is None:
+            raise ValueError(
+                f"Modifier {modifier.name} is not configured with a geometry node tree"
+            )
+
+        inputs = []
+        if hasattr(modifier.node_group, "interface"):
+            for item in modifier.node_group.interface.items_tree:
+                if item.item_type != "SOCKET" or item.in_out != "INPUT":
+                    continue
+
+                identifier = item.identifier
+                value: Any = modifier.get(identifier)
+                if hasattr(value, "__iter__") and not isinstance(value, (str, bytes, dict)):
+                    try:
+                        value = list(value)
+                    except TypeError:
+                        pass
+
+                use_attr_key = f"{identifier}_use_attribute"
+                attr_name_key = f"{identifier}_attribute_name"
+                inputs.append(
+                    {
+                        "name": item.name,
+                        "identifier": identifier,
+                        "socket_type": item.socket_type,
+                        "value": value,
+                        "use_attribute": bool(modifier.get(use_attr_key, False)),
+                        "attribute_name": modifier.get(attr_name_key, ""),
+                    }
+                )
+        else:
+            for socket in modifier.node_group.inputs:
+                identifier = socket.identifier if hasattr(socket, "identifier") else socket.name
+                value = modifier.get(identifier)
+                if hasattr(value, "__iter__") and not isinstance(value, (str, bytes, dict)):
+                    try:
+                        value = list(value)
+                    except TypeError:
+                        pass
+                use_attr_key = f"{identifier}_use_attribute"
+                attr_name_key = f"{identifier}_attribute_name"
+                inputs.append(
+                    {
+                        "name": socket.name,
+                        "identifier": identifier,
+                        "socket_type": getattr(socket, "bl_socket_idname", "UNKNOWN"),
+                        "value": value,
+                        "use_attribute": bool(modifier.get(use_attr_key, False)),
+                        "attribute_name": modifier.get(attr_name_key, ""),
+                    }
+                )
+
+        return {
+            "object_name": obj.name,
+            "modifier_name": modifier.name,
+            "inputs": inputs,
+            "count": len(inputs),
+        }
+
+    if method == "set_geometry_input":
+        object_name = params.get("object_name")
+        modifier_name = params.get("modifier_name", "GeometryNodes")
+        input_ref = params.get("input_name_or_identifier")
+        value = params.get("value")
+        use_attribute = params.get("use_attribute")
+        attribute_name = params.get("attribute_name")
+
+        obj = _require_object(object_name)
+        modifier = _require_modifier(obj, modifier_name)
+        if modifier.type != "NODES" or modifier.node_group is None:
+            raise ValueError(
+                f"Modifier {modifier.name} is not configured with a geometry node tree"
+            )
+
+        identifier, input_name = _resolve_geometry_input_identifier(modifier.node_group, input_ref)
+
+        if isinstance(value, list):
+            cast_value: Any = tuple(value)
+        else:
+            cast_value = value
+
+        if value is not None:
+            modifier[identifier] = cast_value
+
+        use_attr_key = f"{identifier}_use_attribute"
+        attr_name_key = f"{identifier}_attribute_name"
+        if isinstance(use_attribute, bool):
+            modifier[use_attr_key] = use_attribute
+        if isinstance(attribute_name, str):
+            modifier[attr_name_key] = attribute_name
+
+        current: Any = modifier.get(identifier)
+        if hasattr(current, "__iter__") and not isinstance(current, (str, bytes, dict)):
+            try:
+                current = list(current)
+            except TypeError:
+                pass
+
+        return {
+            "object_name": obj.name,
+            "modifier_name": modifier.name,
+            "input": {
+                "name": input_name,
+                "identifier": identifier,
+                "value": current,
+                "use_attribute": bool(modifier.get(use_attr_key, False)),
+                "attribute_name": modifier.get(attr_name_key, ""),
             },
         }
 
@@ -1399,10 +1776,19 @@ def _supported_methods() -> list[str]:
         "set_active_action",
         "push_down_action",
         "clear_animation_data",
+        "duplicate_action",
+        "delete_action",
+        "list_nla_tracks",
+        "create_nla_strip",
+        "set_nla_strip",
+        "remove_nla_strip",
         "create_geometry_nodes_modifier",
         "list_geometry_nodes",
         "add_geometry_node",
         "link_geometry_nodes",
+        "add_geometry_input",
+        "list_geometry_inputs",
+        "set_geometry_input",
         "add_modifier",
         "list_modifiers",
         "apply_modifier",

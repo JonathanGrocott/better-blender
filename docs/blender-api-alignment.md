@@ -31,6 +31,12 @@ This project aligns MCP tool design with Blender's API organization described in
 - `create_action`
 - `set_active_action`
 - `push_down_action`
+- `duplicate_action`
+- `delete_action`
+- `list_nla_tracks`
+- `create_nla_strip`
+- `set_nla_strip`
+- `remove_nla_strip`
 
 ## Operator workflows (`bpy.ops`)
 - File lifecycle: `new_scene`, `open_blend`, `save_blend`
@@ -42,7 +48,7 @@ This project aligns MCP tool design with Blender's API organization described in
 
 ## Animation and rigging workflows
 - `keyframe_transform`, `insert_keyframe`, `list_animation_data`, `clear_animation_data`
-- `add_modifier`, `list_modifiers`, `remove_modifier`, `create_geometry_nodes_modifier`, `list_geometry_nodes`, `add_geometry_node`, `link_geometry_nodes`
+- `add_modifier`, `list_modifiers`, `remove_modifier`, `create_geometry_nodes_modifier`, `list_geometry_nodes`, `add_geometry_node`, `link_geometry_nodes`, `add_geometry_input`, `list_geometry_inputs`, `set_geometry_input`
 - `add_constraint`, `list_constraints`, `remove_constraint`
 
 ## Advanced scripting

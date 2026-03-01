@@ -316,6 +316,95 @@ def create_server(client: BlenderBridgeClient) -> Any:
 
         return client.call("clear_animation_data", {"object_name": object_name})
 
+    @server.tool(name="duplicate_action")
+    def duplicate_action(action_name: str, new_name: str | None = None) -> dict[str, Any]:
+        """Duplicate an action and optionally provide the new action name."""
+
+        params: dict[str, Any] = {"action_name": action_name}
+        if new_name is not None:
+            params["new_name"] = new_name
+        return client.call("duplicate_action", params)
+
+    @server.tool(name="delete_action")
+    def delete_action(action_name: str, force: bool = False) -> dict[str, Any]:
+        """Delete an action. Set force=true to remove even when it has users."""
+
+        return client.call("delete_action", {"action_name": action_name, "force": force})
+
+    @server.tool(name="list_nla_tracks")
+    def list_nla_tracks(object_name: str) -> dict[str, Any]:
+        """List NLA tracks and strips for an object."""
+
+        return client.call("list_nla_tracks", {"object_name": object_name})
+
+    @server.tool(name="create_nla_strip")
+    def create_nla_strip(
+        object_name: str,
+        action_name: str,
+        track_name: str | None = None,
+        strip_name: str | None = None,
+        frame_start: float | None = None,
+    ) -> dict[str, Any]:
+        """Create an NLA strip for an action on an object's track."""
+
+        params: dict[str, Any] = {"object_name": object_name, "action_name": action_name}
+        if track_name is not None:
+            params["track_name"] = track_name
+        if strip_name is not None:
+            params["strip_name"] = strip_name
+        if frame_start is not None:
+            params["frame_start"] = frame_start
+        return client.call("create_nla_strip", params)
+
+    @server.tool(name="set_nla_strip")
+    def set_nla_strip(
+        object_name: str,
+        track_name: str,
+        strip_name: str,
+        frame_start: float | None = None,
+        frame_end: float | None = None,
+        action_frame_start: float | None = None,
+        action_frame_end: float | None = None,
+        scale: float | None = None,
+        repeat: float | None = None,
+        mute: bool | None = None,
+    ) -> dict[str, Any]:
+        """Update timing and playback settings for an NLA strip."""
+
+        params: dict[str, Any] = {
+            "object_name": object_name,
+            "track_name": track_name,
+            "strip_name": strip_name,
+        }
+        if frame_start is not None:
+            params["frame_start"] = frame_start
+        if frame_end is not None:
+            params["frame_end"] = frame_end
+        if action_frame_start is not None:
+            params["action_frame_start"] = action_frame_start
+        if action_frame_end is not None:
+            params["action_frame_end"] = action_frame_end
+        if scale is not None:
+            params["scale"] = scale
+        if repeat is not None:
+            params["repeat"] = repeat
+        if mute is not None:
+            params["mute"] = mute
+        return client.call("set_nla_strip", params)
+
+    @server.tool(name="remove_nla_strip")
+    def remove_nla_strip(object_name: str, track_name: str, strip_name: str) -> dict[str, Any]:
+        """Remove an NLA strip from a track."""
+
+        return client.call(
+            "remove_nla_strip",
+            {
+                "object_name": object_name,
+                "track_name": track_name,
+                "strip_name": strip_name,
+            },
+        )
+
     @server.tool(name="create_geometry_nodes_modifier")
     def create_geometry_nodes_modifier(
         object_name: str,
@@ -380,6 +469,62 @@ def create_server(client: BlenderBridgeClient) -> Any:
                 "to_socket": to_socket,
             },
         )
+
+    @server.tool(name="add_geometry_input")
+    def add_geometry_input(
+        object_name: str,
+        input_name: str,
+        socket_type: str = "NodeSocketFloat",
+        default_value: Any | None = None,
+        modifier_name: str = "GeometryNodes",
+    ) -> dict[str, Any]:
+        """Add an input socket to a geometry-node group interface."""
+
+        return client.call(
+            "add_geometry_input",
+            {
+                "object_name": object_name,
+                "modifier_name": modifier_name,
+                "input_name": input_name,
+                "socket_type": socket_type,
+                "default_value": default_value,
+            },
+        )
+
+    @server.tool(name="list_geometry_inputs")
+    def list_geometry_inputs(
+        object_name: str,
+        modifier_name: str = "GeometryNodes",
+    ) -> dict[str, Any]:
+        """List editable geometry-node group inputs for a modifier."""
+
+        return client.call(
+            "list_geometry_inputs",
+            {"object_name": object_name, "modifier_name": modifier_name},
+        )
+
+    @server.tool(name="set_geometry_input")
+    def set_geometry_input(
+        object_name: str,
+        input_name_or_identifier: str,
+        value: Any | None = None,
+        modifier_name: str = "GeometryNodes",
+        use_attribute: bool | None = None,
+        attribute_name: str | None = None,
+    ) -> dict[str, Any]:
+        """Set a geometry-node input value or attribute binding."""
+
+        params: dict[str, Any] = {
+            "object_name": object_name,
+            "modifier_name": modifier_name,
+            "input_name_or_identifier": input_name_or_identifier,
+            "value": value,
+        }
+        if use_attribute is not None:
+            params["use_attribute"] = use_attribute
+        if attribute_name is not None:
+            params["attribute_name"] = attribute_name
+        return client.call("set_geometry_input", params)
 
     @server.tool(name="add_modifier")
     def add_modifier(

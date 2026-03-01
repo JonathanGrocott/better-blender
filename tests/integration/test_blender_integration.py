@@ -130,6 +130,49 @@ def test_bridge_health_and_object_pipeline(bridge_client: BlenderBridgeClient) -
     anim = bridge_client.call("list_animation_data", {"name": "CubeA"})
     assert anim["has_animation"] is True
 
+    actions = bridge_client.call("list_actions")
+    assert actions["count"] >= 1
+
+    duplicate = bridge_client.call(
+        "duplicate_action",
+        {"action_name": anim["action"], "new_name": "CubeA_Action_Copy"},
+    )
+    assert duplicate["action"]["name"] == "CubeA_Action_Copy"
+
+    strip = bridge_client.call(
+        "create_nla_strip",
+        {
+            "object_name": "CubeA",
+            "action_name": "CubeA_Action_Copy",
+            "track_name": "TrackA",
+            "strip_name": "StripA",
+            "frame_start": 1,
+        },
+    )
+    assert strip["strip"]["name"] == "StripA"
+
+    updated = bridge_client.call(
+        "set_nla_strip",
+        {
+            "object_name": "CubeA",
+            "track_name": "TrackA",
+            "strip_name": "StripA",
+            "scale": 1.5,
+            "repeat": 2.0,
+        },
+    )
+    assert updated["strip"]["scale"] == 1.5
+    assert updated["strip"]["repeat"] == 2.0
+
+    tracks = bridge_client.call("list_nla_tracks", {"object_name": "CubeA"})
+    assert tracks["count"] >= 1
+
+    removed = bridge_client.call(
+        "remove_nla_strip",
+        {"object_name": "CubeA", "track_name": "TrackA", "strip_name": "StripA"},
+    )
+    assert removed["removed_strip"] == "StripA"
+
 
 def test_modifiers_collections_and_compositor(bridge_client: BlenderBridgeClient) -> None:
     bridge_client.call("new_scene", {"use_empty": True})
@@ -151,6 +194,34 @@ def test_modifiers_collections_and_compositor(bridge_client: BlenderBridgeClient
         {"object_name": "CubeB", "modifier_name": "GeoNodesA"},
     )
     assert gn["modifier"]["type"] == "NODES"
+
+    geom_input = bridge_client.call(
+        "add_geometry_input",
+        {
+            "object_name": "CubeB",
+            "modifier_name": "GeoNodesA",
+            "input_name": "ScaleInput",
+            "socket_type": "NodeSocketFloat",
+            "default_value": 1.0,
+        },
+    )
+    identifier = geom_input["input"]["identifier"]
+
+    bridge_client.call(
+        "set_geometry_input",
+        {
+            "object_name": "CubeB",
+            "modifier_name": "GeoNodesA",
+            "input_name_or_identifier": identifier,
+            "value": 2.5,
+        },
+    )
+    inputs = bridge_client.call(
+        "list_geometry_inputs",
+        {"object_name": "CubeB", "modifier_name": "GeoNodesA"},
+    )
+    by_id = {item["identifier"]: item for item in inputs["inputs"]}
+    assert by_id[identifier]["value"] == 2.5
 
     bridge_client.call("create_collection", {"name": "CollectionA"})
     bridge_client.call(
