@@ -759,6 +759,75 @@ def create_server(client: BlenderBridgeClient) -> Any:
             params["use_pass_ambient_occlusion"] = use_pass_ambient_occlusion
         return client.call("set_view_layer_passes", params)
 
+    @server.tool(name="set_viewport_view")
+    def set_viewport_view(
+        view: str | None = None,
+        location: list[float] | None = None,
+        rotation_quaternion: list[float] | None = None,
+        distance: float | None = None,
+        lens: float | None = None,
+        shading_type: str | None = None,
+    ) -> dict[str, Any]:
+        """Adjust a VIEW_3D viewport camera for better captures."""
+
+        params: dict[str, Any] = {}
+        if view is not None:
+            params["view"] = view
+        if location is not None:
+            params["location"] = location
+        if rotation_quaternion is not None:
+            params["rotation_quaternion"] = rotation_quaternion
+        if distance is not None:
+            params["distance"] = distance
+        if lens is not None:
+            params["lens"] = lens
+        if shading_type is not None:
+            params["shading_type"] = shading_type
+        return client.call("set_viewport_view", params)
+
+    @server.tool(name="capture_viewport_screenshot")
+    def capture_viewport_screenshot(
+        filepath: str,
+        view: str | None = None,
+        location: list[float] | None = None,
+        rotation_quaternion: list[float] | None = None,
+        distance: float | None = None,
+        lens: float | None = None,
+        shading_type: str | None = None,
+        resolution_x: int | None = None,
+        resolution_y: int | None = None,
+        engine: str | None = None,
+        samples: int | None = None,
+        fallback_to_render: bool = True,
+    ) -> dict[str, Any]:
+        """Capture viewport image; fall back to regular render in headless mode."""
+
+        params: dict[str, Any] = {
+            "filepath": filepath,
+            "fallback_to_render": fallback_to_render,
+        }
+        if view is not None:
+            params["view"] = view
+        if location is not None:
+            params["location"] = location
+        if rotation_quaternion is not None:
+            params["rotation_quaternion"] = rotation_quaternion
+        if distance is not None:
+            params["distance"] = distance
+        if lens is not None:
+            params["lens"] = lens
+        if shading_type is not None:
+            params["shading_type"] = shading_type
+        if resolution_x is not None:
+            params["resolution_x"] = resolution_x
+        if resolution_y is not None:
+            params["resolution_y"] = resolution_y
+        if engine is not None:
+            params["engine"] = engine
+        if samples is not None:
+            params["samples"] = samples
+        return client.call("capture_viewport_screenshot", params)
+
     @server.tool(name="workflow_setup_studio")
     def workflow_setup_studio(
         object_name: str = "Subject",

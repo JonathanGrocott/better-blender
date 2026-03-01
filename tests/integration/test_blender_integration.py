@@ -271,3 +271,29 @@ def test_high_level_workflow_turntable_render(
 
     rendered_files = list(render_dir.glob("frame_*"))
     assert rendered_files, "Expected rendered animation frames to exist"
+
+
+def test_capture_viewport_screenshot_headless_fallback(
+    bridge_client: BlenderBridgeClient,
+    tmp_path: Path,
+) -> None:
+    bridge_client.call("new_scene", {"use_empty": True})
+    bridge_client.call(
+        "workflow_setup_studio",
+        {"object_name": "CaptureSubject", "primitive": "CUBE", "size": 1.0},
+    )
+
+    capture_path = tmp_path / "viewport_capture.png"
+    result = bridge_client.call(
+        "capture_viewport_screenshot",
+        {
+            "filepath": str(capture_path),
+            "fallback_to_render": True,
+            "engine": "BLENDER_WORKBENCH",
+            "resolution_x": 64,
+            "resolution_y": 64,
+        },
+    )
+    assert result["captured"] is True
+    assert result["capture_mode"] in {"viewport_opengl", "render_fallback_no_viewport"}
+    assert capture_path.exists()

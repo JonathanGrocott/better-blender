@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 import bpy
-from mathutils import Vector
+from mathutils import Quaternion, Vector
 
 bl_info = {
     "name": "Better Blender Bridge",
@@ -137,6 +137,19 @@ def _to_vector3(raw: Any, field: str) -> tuple[float, float, float]:
         values.append(float(value))
 
     return (values[0], values[1], values[2])
+
+
+def _to_quaternion(raw: Any, field: str) -> tuple[float, float, float, float]:
+    if not isinstance(raw, list) or len(raw) != 4:
+        raise ValueError(f"{field} must be a list of 4 numbers")
+
+    values: list[float] = []
+    for value in raw:
+        if not isinstance(value, (int, float)):
+            raise ValueError(f"{field} must contain only numbers")
+        values.append(float(value))
+
+    return (values[0], values[1], values[2], values[3])
 
 
 def _normalize_path(raw: Any, *, require_exists: bool) -> str:
@@ -460,6 +473,44 @@ def _create_or_update_light(
     bpy.context.scene.collection.objects.link(light_object)
     light_object.location = location
     return light_object
+
+
+def _find_view3d_context() -> (
+    tuple[
+        bpy.types.Window,
+        bpy.types.Area,
+        bpy.types.Region,
+        bpy.types.SpaceView3D,
+        bpy.types.RegionView3D,
+    ]
+    | None
+):
+    wm = bpy.context.window_manager
+    for window in wm.windows:
+        screen = window.screen
+        if screen is None:
+            continue
+
+        for area in screen.areas:
+            if area.type != "VIEW_3D":
+                continue
+            if not area.spaces:
+                continue
+
+            space = area.spaces.active
+            if not isinstance(space, bpy.types.SpaceView3D):
+                continue
+
+            region = next((reg for reg in area.regions if reg.type == "WINDOW"), None)
+            if region is None:
+                continue
+
+            region_3d = space.region_3d
+            if region_3d is None:
+                continue
+
+            return window, area, region, space, region_3d
+    return None
 
 
 def _dispatch_command(method: str, params: dict[str, Any]) -> dict[str, Any]:
@@ -1576,6 +1627,124 @@ def _dispatch_command(method: str, params: dict[str, Any]) -> dict[str, Any]:
             "unsupported": unsupported,
         }
 
+    if method == "set_viewport_view":
+        if bpy.app.background:
+            raise ValueError("Viewport view controls are unavailable in background mode")
+
+        context = _find_view3d_context()
+        if context is None:
+            raise ValueError("No VIEW_3D viewport context available (likely headless mode)")
+
+        window, area, region, space, region_3d = context
+        view = params.get("view")
+        location = params.get("location")
+        rotation_quaternion = params.get("rotation_quaternion")
+        distance = params.get("distance")
+        lens = params.get("lens")
+        shading_type = params.get("shading_type")
+
+        if isinstance(view, str) and view:
+            view_upper = view.upper()
+            with bpy.context.temp_override(window=window, area=area, region=region):
+                if view_upper in {"FRONT", "BACK", "LEFT", "RIGHT", "TOP", "BOTTOM"}:
+                    bpy.ops.view3d.view_axis(type=view_upper, align_active=False)
+                elif view_upper == "CAMERA":
+                    bpy.ops.view3d.view_camera()
+                elif view_upper == "PERSP":
+                    region_3d.view_perspective = "PERSP"
+                elif view_upper == "ORTHO":
+                    region_3d.view_perspective = "ORTHO"
+                else:
+                    raise ValueError(
+                        "view must be one of FRONT/BACK/LEFT/RIGHT/TOP/BOTTOM/CAMERA/PERSP/ORTHO"
+                    )
+
+        if "location" in params:
+            region_3d.view_location = _to_vector3(location, "location")
+        if "rotation_quaternion" in params:
+            region_3d.view_rotation = Quaternion(
+                _to_quaternion(rotation_quaternion, "rotation_quaternion")
+            )
+        if isinstance(distance, (int, float)):
+            region_3d.view_distance = float(distance)
+        if isinstance(lens, (int, float)):
+            space.lens = float(lens)
+        if isinstance(shading_type, str) and hasattr(space, "shading"):
+            space.shading.type = shading_type.upper()
+
+        return {
+            "view_perspective": region_3d.view_perspective,
+            "view_location": [float(v) for v in region_3d.view_location],
+            "view_distance": float(region_3d.view_distance),
+            "view_rotation": [float(v) for v in region_3d.view_rotation],
+            "lens": float(space.lens),
+            "shading_type": space.shading.type if hasattr(space, "shading") else None,
+        }
+
+    if method == "capture_viewport_screenshot":
+        filepath = _normalize_path(params.get("filepath"), require_exists=False)
+        Path(filepath).parent.mkdir(parents=True, exist_ok=True)
+        context = _find_view3d_context()
+        fallback_to_render = bool(params.get("fallback_to_render", True))
+
+        if bpy.app.background:
+            context = None
+
+        if context is None:
+            if not fallback_to_render:
+                raise ValueError("No VIEW_3D viewport context available (likely headless mode)")
+
+            render_params: dict[str, Any] = {"filepath": filepath}
+            for key in ("engine", "resolution_x", "resolution_y", "samples"):
+                if key in params:
+                    render_params[key] = params[key]
+            result = _dispatch_command("render_still", render_params)
+            result["capture_mode"] = "render_fallback_no_viewport"
+            result["viewport_available"] = False
+            result["captured"] = True
+            return result
+
+        window, area, region, _, _ = context
+
+        view_params: dict[str, Any] = {}
+        for key in (
+            "view",
+            "location",
+            "rotation_quaternion",
+            "distance",
+            "lens",
+            "shading_type",
+        ):
+            if key in params:
+                view_params[key] = params[key]
+        if view_params:
+            _dispatch_command("set_viewport_view", view_params)
+
+        scene = bpy.context.scene
+        old_filepath = scene.render.filepath
+        old_res_x = scene.render.resolution_x
+        old_res_y = scene.render.resolution_y
+        try:
+            scene.render.filepath = filepath
+            if isinstance(params.get("resolution_x"), int) and params.get("resolution_x") > 0:
+                scene.render.resolution_x = int(params.get("resolution_x"))
+            if isinstance(params.get("resolution_y"), int) and params.get("resolution_y") > 0:
+                scene.render.resolution_y = int(params.get("resolution_y"))
+
+            with bpy.context.temp_override(window=window, area=area, region=region):
+                bpy.ops.render.opengl(write_still=True, view_context=True)
+        finally:
+            scene.render.filepath = old_filepath
+            scene.render.resolution_x = old_res_x
+            scene.render.resolution_y = old_res_y
+
+        return {
+            "captured": True,
+            "filepath": filepath,
+            "capture_mode": "viewport_opengl",
+            "viewport_available": True,
+        }
+
     if method == "workflow_setup_studio":
         object_name = params.get("object_name", "Subject")
         primitive = params.get("primitive", "CUBE")
@@ -2033,6 +2202,8 @@ def _supported_methods() -> list[str]:
         "add_compositor_node",
         "link_compositor_nodes",
         "set_view_layer_passes",
+        "set_viewport_view",
+        "capture_viewport_screenshot",
         "workflow_setup_studio",
         "workflow_create_turntable",
         "workflow_turntable_render",

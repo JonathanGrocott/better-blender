@@ -108,6 +108,8 @@ Failure:
 - `add_compositor_node`
 - `link_compositor_nodes`
 - `set_view_layer_passes`
+- `set_viewport_view`
+- `capture_viewport_screenshot`
 - `render_still`
 - `render_animation`
 - `workflow_setup_studio`

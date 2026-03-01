@@ -17,6 +17,7 @@ This project aligns MCP tool design with Blender's API organization described in
 - `set_active_view_layer`
 - `set_collection_visibility`
 - `set_view_layer_passes`
+- `set_viewport_view`
 
 ## Data-block workflows (`bpy.data`)
 - `get_object_info`
@@ -44,6 +45,7 @@ This project aligns MCP tool design with Blender's API organization described in
 - Modifier actions: `apply_modifier`
 - Compositor actions: `enable_compositor`, `add_compositor_node`, `link_compositor_nodes`
 - Rendering: `render_still`, `render_animation`
+- Viewport capture: `capture_viewport_screenshot`
 - Import/export: `import_file`, `export_file`
 
 ## High-level workflows
