@@ -1,0 +1,17 @@
+README.md
+pyproject.toml
+src/better_blender_mcp/__init__.py
+src/better_blender_mcp/bridge_client.py
+src/better_blender_mcp/cli.py
+src/better_blender_mcp/config.py
+src/better_blender_mcp/mcp_server.py
+src/better_blender_mcp/protocol.py
+src/better_blender_mcp.egg-info/PKG-INFO
+src/better_blender_mcp.egg-info/SOURCES.txt
+src/better_blender_mcp.egg-info/dependency_links.txt
+src/better_blender_mcp.egg-info/entry_points.txt
+src/better_blender_mcp.egg-info/requires.txt
+src/better_blender_mcp.egg-info/top_level.txt
+tests/test_bridge_client.py
+tests/test_config.py
+tests/test_protocol.py

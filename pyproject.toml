@@ -1,0 +1,61 @@
+[build-system]
+requires = ["setuptools>=70", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "better-blender-mcp"
+version = "0.1.0"
+description = "MCP server and Blender bridge add-on for local Blender automation"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "Better Blender Contributors" }]
+license = { text = "MIT" }
+dependencies = [
+  "mcp>=1.6.0",
+  "pydantic>=2.7.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "mypy>=1.10.0",
+  "pytest>=8.2.0",
+  "pytest-cov>=5.0.0",
+  "ruff>=0.5.0",
+  "pre-commit>=3.7.0",
+]
+
+[project.scripts]
+better-blender-mcp = "better_blender_mcp.cli:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "N"]
+ignore = []
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unused_configs = true
+warn_return_any = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+show_error_codes = true
+pretty = true
+mypy_path = ["src"]
+
+[[tool.mypy.overrides]]
+module = ["mcp.*"]
+ignore_missing_imports = true

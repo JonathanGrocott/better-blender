@@ -1,0 +1,2 @@
+[console_scripts]
+better-blender-mcp = better_blender_mcp.cli:main
