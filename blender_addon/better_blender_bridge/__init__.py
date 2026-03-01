@@ -186,6 +186,47 @@ def _require_object(name: Any) -> bpy.types.Object:
     return obj
 
 
+def _set_active_object(obj: bpy.types.Object) -> None:
+    bpy.ops.object.select_all(action="DESELECT")
+    obj.select_set(True)
+    bpy.context.view_layer.objects.active = obj
+
+
+def _require_collection(name: Any) -> bpy.types.Collection:
+    if not isinstance(name, str) or not name:
+        raise ValueError("collection name must be a non-empty string")
+
+    collection = bpy.data.collections.get(name)
+    if collection is None:
+        raise ValueError(f"Collection not found: {name}")
+    return collection
+
+
+def _find_layer_collection(
+    layer_collection: bpy.types.LayerCollection,
+    target_name: str,
+) -> bpy.types.LayerCollection | None:
+    if layer_collection.collection.name == target_name:
+        return layer_collection
+
+    for child in layer_collection.children:
+        found = _find_layer_collection(child, target_name)
+        if found is not None:
+            return found
+    return None
+
+
+def _require_view_layer(name: str | None) -> bpy.types.ViewLayer:
+    scene = bpy.context.scene
+    if name is None:
+        return bpy.context.view_layer
+
+    view_layer = scene.view_layers.get(name)
+    if view_layer is None:
+        raise ValueError(f"View layer not found: {name}")
+    return view_layer
+
+
 def _dispatch_command(method: str, params: dict[str, Any]) -> dict[str, Any]:
     if method == "health":
         return {
@@ -229,6 +270,30 @@ def _dispatch_command(method: str, params: dict[str, Any]) -> dict[str, Any]:
             "objects_total": len(scene.objects),
             "collections_total": len(bpy.data.collections),
             "file_path": bpy.data.filepath,
+        }
+
+    if method == "set_timeline":
+        scene = bpy.context.scene
+
+        frame_start = params.get("frame_start")
+        frame_end = params.get("frame_end")
+        frame_current = params.get("frame_current")
+        fps = params.get("fps")
+
+        if isinstance(frame_start, int):
+            scene.frame_start = frame_start
+        if isinstance(frame_end, int):
+            scene.frame_end = frame_end
+        if isinstance(frame_current, int):
+            scene.frame_set(frame_current)
+        if isinstance(fps, int) and fps > 0:
+            scene.render.fps = fps
+
+        return {
+            "frame_start": scene.frame_start,
+            "frame_end": scene.frame_end,
+            "frame_current": scene.frame_current,
+            "fps": scene.render.fps,
         }
 
     if method == "list_objects":
@@ -357,6 +422,181 @@ def _dispatch_command(method: str, params: dict[str, Any]) -> dict[str, Any]:
             duplicated.name = new_name
 
         return {"object": _serialize_object(duplicated)}
+
+    if method == "keyframe_transform":
+        obj = _require_object(params.get("name"))
+        frame = params.get("frame")
+        if not isinstance(frame, int):
+            raise ValueError("frame must be an integer")
+
+        location_set = "location" in params
+        rotation_set = "rotation" in params
+        scale_set = "scale" in params
+        if not location_set and not rotation_set and not scale_set:
+            raise ValueError("At least one of location, rotation, or scale must be provided")
+
+        if location_set:
+            obj.location = _to_vector3(params["location"], "location")
+            obj.keyframe_insert(data_path="location", frame=frame)
+        if rotation_set:
+            obj.rotation_euler = _to_vector3(params["rotation"], "rotation")
+            obj.keyframe_insert(data_path="rotation_euler", frame=frame)
+        if scale_set:
+            obj.scale = _to_vector3(params["scale"], "scale")
+            obj.keyframe_insert(data_path="scale", frame=frame)
+
+        return {"object": _serialize_object(obj), "frame": frame}
+
+    if method == "insert_keyframe":
+        obj = _require_object(params.get("name"))
+        data_path = params.get("data_path")
+        frame = params.get("frame")
+        index = params.get("index", -1)
+
+        if not isinstance(data_path, str) or not data_path:
+            raise ValueError("data_path must be a non-empty string")
+        if not isinstance(frame, int):
+            raise ValueError("frame must be an integer")
+        if not isinstance(index, int):
+            raise ValueError("index must be an integer")
+
+        inserted = obj.keyframe_insert(data_path=data_path, frame=frame, index=index)
+        return {
+            "inserted": bool(inserted),
+            "name": obj.name,
+            "data_path": data_path,
+            "frame": frame,
+            "index": index,
+        }
+
+    if method == "list_animation_data":
+        obj = _require_object(params.get("name"))
+        animation_data = obj.animation_data
+        if animation_data is None or animation_data.action is None:
+            return {"name": obj.name, "has_animation": False, "action": None, "fcurves": []}
+
+        fcurves = []
+        for fcurve in animation_data.action.fcurves:
+            fcurves.append(
+                {
+                    "data_path": fcurve.data_path,
+                    "array_index": fcurve.array_index,
+                    "keyframes": len(fcurve.keyframe_points),
+                }
+            )
+
+        return {
+            "name": obj.name,
+            "has_animation": True,
+            "action": animation_data.action.name,
+            "fcurves": fcurves,
+        }
+
+    if method == "add_modifier":
+        obj = _require_object(params.get("object_name"))
+        modifier_type = params.get("modifier_type")
+        name = params.get("name")
+
+        if not isinstance(modifier_type, str) or not modifier_type:
+            raise ValueError("modifier_type must be a non-empty string")
+
+        modifier_name = name if isinstance(name, str) and name else modifier_type.title()
+        modifier = obj.modifiers.new(name=modifier_name, type=modifier_type.upper())
+
+        settings = params.get("settings")
+        if isinstance(settings, dict):
+            for key, value in settings.items():
+                if hasattr(modifier, key):
+                    setattr(modifier, key, value)
+
+        return {
+            "object_name": obj.name,
+            "modifier": {"name": modifier.name, "type": modifier.type},
+            "modifiers_total": len(obj.modifiers),
+        }
+
+    if method == "list_modifiers":
+        obj = _require_object(params.get("object_name"))
+        modifiers = [{"name": mod.name, "type": mod.type} for mod in obj.modifiers]
+        return {"object_name": obj.name, "modifiers": modifiers, "count": len(modifiers)}
+
+    if method == "apply_modifier":
+        obj = _require_object(params.get("object_name"))
+        modifier_name = params.get("modifier_name")
+        if not isinstance(modifier_name, str) or not modifier_name:
+            raise ValueError("modifier_name must be a non-empty string")
+
+        if obj.modifiers.get(modifier_name) is None:
+            raise ValueError(f"Modifier not found: {modifier_name}")
+
+        _set_active_object(obj)
+        bpy.ops.object.modifier_apply(modifier=modifier_name)
+        return {"object_name": obj.name, "applied_modifier": modifier_name}
+
+    if method == "remove_modifier":
+        obj = _require_object(params.get("object_name"))
+        modifier_name = params.get("modifier_name")
+        if not isinstance(modifier_name, str) or not modifier_name:
+            raise ValueError("modifier_name must be a non-empty string")
+
+        modifier = obj.modifiers.get(modifier_name)
+        if modifier is None:
+            raise ValueError(f"Modifier not found: {modifier_name}")
+
+        obj.modifiers.remove(modifier)
+        return {"object_name": obj.name, "removed_modifier": modifier_name}
+
+    if method == "add_constraint":
+        obj = _require_object(params.get("object_name"))
+        constraint_type = params.get("constraint_type")
+        constraint_name = params.get("name")
+        target_name = params.get("target_name")
+
+        if not isinstance(constraint_type, str) or not constraint_type:
+            raise ValueError("constraint_type must be a non-empty string")
+
+        constraint = obj.constraints.new(type=constraint_type.upper())
+        if isinstance(constraint_name, str) and constraint_name:
+            constraint.name = constraint_name
+
+        if isinstance(target_name, str) and target_name:
+            target = _require_object(target_name)
+            if hasattr(constraint, "target"):
+                constraint.target = target
+
+        return {
+            "object_name": obj.name,
+            "constraint": {"name": constraint.name, "type": constraint.type},
+            "constraints_total": len(obj.constraints),
+        }
+
+    if method == "list_constraints":
+        obj = _require_object(params.get("object_name"))
+        constraints = []
+        for constraint in obj.constraints:
+            constraints.append(
+                {
+                    "name": constraint.name,
+                    "type": constraint.type,
+                    "target": constraint.target.name
+                    if hasattr(constraint, "target") and constraint.target is not None
+                    else None,
+                }
+            )
+        return {"object_name": obj.name, "constraints": constraints, "count": len(constraints)}
+
+    if method == "remove_constraint":
+        obj = _require_object(params.get("object_name"))
+        constraint_name = params.get("constraint_name")
+        if not isinstance(constraint_name, str) or not constraint_name:
+            raise ValueError("constraint_name must be a non-empty string")
+
+        constraint = obj.constraints.get(constraint_name)
+        if constraint is None:
+            raise ValueError(f"Constraint not found: {constraint_name}")
+
+        obj.constraints.remove(constraint)
+        return {"object_name": obj.name, "removed_constraint": constraint_name}
 
     if method == "create_material":
         name = params.get("name")
@@ -547,6 +787,119 @@ def _dispatch_command(method: str, params: dict[str, Any]) -> dict[str, Any]:
         ]
         return {"collections": collections, "count": len(collections)}
 
+    if method == "create_collection":
+        name = params.get("name")
+        parent_name = params.get("parent_name")
+        link_to_scene = bool(params.get("link_to_scene", True))
+
+        if not isinstance(name, str) or not name:
+            raise ValueError("name must be a non-empty string")
+
+        if bpy.data.collections.get(name) is not None:
+            raise ValueError(f"Collection already exists: {name}")
+
+        collection = bpy.data.collections.new(name)
+        if isinstance(parent_name, str) and parent_name:
+            parent = _require_collection(parent_name)
+            parent.children.link(collection)
+        elif link_to_scene:
+            bpy.context.scene.collection.children.link(collection)
+
+        return {"collection": {"name": collection.name, "objects_total": len(collection.objects)}}
+
+    if method == "add_object_to_collection":
+        object_name = params.get("object_name")
+        collection_name = params.get("collection_name")
+        unlink_from_others = bool(params.get("unlink_from_others", False))
+
+        obj = _require_object(object_name)
+        collection = _require_collection(collection_name)
+
+        if obj.name not in collection.objects:
+            collection.objects.link(obj)
+
+        if unlink_from_others:
+            for candidate in bpy.data.collections:
+                if candidate.name != collection.name and obj.name in candidate.objects:
+                    candidate.objects.unlink(obj)
+
+        return {
+            "object_name": obj.name,
+            "collection_name": collection.name,
+            "unlink_from_others": unlink_from_others,
+        }
+
+    if method == "remove_object_from_collection":
+        object_name = params.get("object_name")
+        collection_name = params.get("collection_name")
+        obj = _require_object(object_name)
+        collection = _require_collection(collection_name)
+
+        if obj.name not in collection.objects:
+            raise ValueError(f"Object {obj.name} is not linked to collection {collection.name}")
+
+        collection.objects.unlink(obj)
+        return {"object_name": obj.name, "collection_name": collection.name}
+
+    if method == "list_view_layers":
+        scene = bpy.context.scene
+        active = bpy.context.view_layer.name
+        layers = [{"name": view_layer.name} for view_layer in scene.view_layers]
+        return {"view_layers": layers, "active_view_layer": active, "count": len(layers)}
+
+    if method == "set_active_view_layer":
+        name = params.get("name")
+        if not isinstance(name, str) or not name:
+            raise ValueError("name must be a non-empty string")
+
+        view_layer = _require_view_layer(name)
+        window = bpy.context.window
+        if window is None:
+            raise RuntimeError("No active window available to set view layer")
+        window.view_layer = view_layer
+        return {"active_view_layer": view_layer.name}
+
+    if method == "set_collection_visibility":
+        collection_name = params.get("collection_name")
+        collection = _require_collection(collection_name)
+        view_layer_name = params.get("view_layer_name")
+        resolved_view_layer_name = view_layer_name if isinstance(view_layer_name, str) else None
+        view_layer = _require_view_layer(resolved_view_layer_name)
+
+        hide_viewport = params.get("hide_viewport")
+        hide_render = params.get("hide_render")
+        exclude = params.get("exclude")
+        holdout = params.get("holdout")
+        indirect_only = params.get("indirect_only")
+
+        if isinstance(hide_viewport, bool):
+            collection.hide_viewport = hide_viewport
+        if isinstance(hide_render, bool):
+            collection.hide_render = hide_render
+
+        layer_collection = _find_layer_collection(view_layer.layer_collection, collection.name)
+        if layer_collection is None:
+            raise ValueError(
+                f"Collection {collection.name} is not present in view layer {view_layer.name}"
+            )
+
+        if isinstance(exclude, bool):
+            layer_collection.exclude = exclude
+        if isinstance(holdout, bool):
+            layer_collection.holdout = holdout
+        if isinstance(indirect_only, bool):
+            layer_collection.indirect_only = indirect_only
+
+        return {
+            "collection_name": collection.name,
+            "view_layer_name": view_layer.name,
+            "hide_viewport": collection.hide_viewport,
+            "hide_render": collection.hide_render,
+            "exclude": layer_collection.exclude,
+            "holdout": layer_collection.holdout,
+            "indirect_only": layer_collection.indirect_only,
+        }
+
     if method == "execute_code":
         prefs = _get_addon_prefs()
         if not prefs.allow_unsafe_code:
@@ -578,12 +931,23 @@ def _supported_methods() -> list[str]:
         "open_blend",
         "save_blend",
         "get_scene_info",
+        "set_timeline",
         "list_objects",
         "get_object_info",
         "create_primitive",
         "delete_object",
         "set_object_transform",
         "duplicate_object",
+        "keyframe_transform",
+        "insert_keyframe",
+        "list_animation_data",
+        "add_modifier",
+        "list_modifiers",
+        "apply_modifier",
+        "remove_modifier",
+        "add_constraint",
+        "list_constraints",
+        "remove_constraint",
         "create_material",
         "assign_material",
         "create_camera",
@@ -593,6 +957,12 @@ def _supported_methods() -> list[str]:
         "import_file",
         "export_file",
         "list_collections",
+        "create_collection",
+        "add_object_to_collection",
+        "remove_object_from_collection",
+        "list_view_layers",
+        "set_active_view_layer",
+        "set_collection_visibility",
         "execute_code",
     ]
 

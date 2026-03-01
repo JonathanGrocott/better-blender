@@ -8,8 +8,11 @@ This repository now includes:
 - `better_blender_bridge` Blender add-on skeleton with authenticated local socket bridge.
 - Implemented MCP tools (first functional set):
   - System: `get_blender_status`
-  - Scene/File: `new_scene`, `open_blend`, `save_blend`, `get_scene_info`, `list_collections`
+  - Scene/File: `new_scene`, `open_blend`, `save_blend`, `get_scene_info`, `set_timeline`
+  - Collections/View Layers: `list_collections`, `create_collection`, `add_object_to_collection`, `remove_object_from_collection`, `list_view_layers`, `set_active_view_layer`, `set_collection_visibility`
   - Objects: `list_objects`, `get_object_info`, `create_primitive`, `delete_object`, `set_object_transform`, `duplicate_object`
+  - Animation: `keyframe_transform`, `insert_keyframe`, `list_animation_data`
+  - Modifiers/Constraints: `add_modifier`, `list_modifiers`, `apply_modifier`, `remove_modifier`, `add_constraint`, `list_constraints`, `remove_constraint`
   - Materials: `create_material`, `assign_material`
   - Camera/Light: `create_camera`, `set_active_camera`, `create_light`
   - Rendering: `render_still`

@@ -53,11 +53,112 @@ def create_server(client: BlenderBridgeClient) -> Any:
 
         return client.call("get_scene_info")
 
+    @server.tool(name="set_timeline")
+    def set_timeline(
+        frame_start: int | None = None,
+        frame_end: int | None = None,
+        frame_current: int | None = None,
+        fps: int | None = None,
+    ) -> dict[str, Any]:
+        """Set timeline start/end/current frame and fps."""
+
+        params: dict[str, Any] = {}
+        if frame_start is not None:
+            params["frame_start"] = frame_start
+        if frame_end is not None:
+            params["frame_end"] = frame_end
+        if frame_current is not None:
+            params["frame_current"] = frame_current
+        if fps is not None:
+            params["fps"] = fps
+        return client.call("set_timeline", params)
+
     @server.tool(name="list_collections")
     def list_collections() -> dict[str, Any]:
         """List scene collections and object counts."""
 
         return client.call("list_collections")
+
+    @server.tool(name="create_collection")
+    def create_collection(
+        name: str,
+        parent_name: str | None = None,
+        link_to_scene: bool = True,
+    ) -> dict[str, Any]:
+        """Create a new collection and link it under a parent or scene root."""
+
+        params: dict[str, Any] = {"name": name, "link_to_scene": link_to_scene}
+        if parent_name is not None:
+            params["parent_name"] = parent_name
+        return client.call("create_collection", params)
+
+    @server.tool(name="add_object_to_collection")
+    def add_object_to_collection(
+        object_name: str,
+        collection_name: str,
+        unlink_from_others: bool = False,
+    ) -> dict[str, Any]:
+        """Link an object into a collection."""
+
+        return client.call(
+            "add_object_to_collection",
+            {
+                "object_name": object_name,
+                "collection_name": collection_name,
+                "unlink_from_others": unlink_from_others,
+            },
+        )
+
+    @server.tool(name="remove_object_from_collection")
+    def remove_object_from_collection(
+        object_name: str,
+        collection_name: str,
+    ) -> dict[str, Any]:
+        """Unlink an object from a collection."""
+
+        return client.call(
+            "remove_object_from_collection",
+            {"object_name": object_name, "collection_name": collection_name},
+        )
+
+    @server.tool(name="list_view_layers")
+    def list_view_layers() -> dict[str, Any]:
+        """List scene view layers."""
+
+        return client.call("list_view_layers")
+
+    @server.tool(name="set_active_view_layer")
+    def set_active_view_layer(name: str) -> dict[str, Any]:
+        """Set the active view layer in the current window."""
+
+        return client.call("set_active_view_layer", {"name": name})
+
+    @server.tool(name="set_collection_visibility")
+    def set_collection_visibility(
+        collection_name: str,
+        hide_viewport: bool | None = None,
+        hide_render: bool | None = None,
+        exclude: bool | None = None,
+        holdout: bool | None = None,
+        indirect_only: bool | None = None,
+        view_layer_name: str | None = None,
+    ) -> dict[str, Any]:
+        """Set collection visibility globally and per-view-layer."""
+
+        params: dict[str, Any] = {"collection_name": collection_name}
+        if hide_viewport is not None:
+            params["hide_viewport"] = hide_viewport
+        if hide_render is not None:
+            params["hide_render"] = hide_render
+        if exclude is not None:
+            params["exclude"] = exclude
+        if holdout is not None:
+            params["holdout"] = holdout
+        if indirect_only is not None:
+            params["indirect_only"] = indirect_only
+        if view_layer_name is not None:
+            params["view_layer_name"] = view_layer_name
+        return client.call("set_collection_visibility", params)
 
     @server.tool(name="list_objects")
     def list_objects() -> dict[str, Any]:
@@ -130,6 +231,127 @@ def create_server(client: BlenderBridgeClient) -> Any:
         if new_name is not None:
             params["new_name"] = new_name
         return client.call("duplicate_object", params)
+
+    @server.tool(name="keyframe_transform")
+    def keyframe_transform(
+        name: str,
+        frame: int,
+        location: list[float] | None = None,
+        rotation: list[float] | None = None,
+        scale: list[float] | None = None,
+    ) -> dict[str, Any]:
+        """Set object transform values and insert keyframes at a frame."""
+
+        params: dict[str, Any] = {"name": name, "frame": frame}
+        if location is not None:
+            params["location"] = location
+        if rotation is not None:
+            params["rotation"] = rotation
+        if scale is not None:
+            params["scale"] = scale
+        return client.call("keyframe_transform", params)
+
+    @server.tool(name="insert_keyframe")
+    def insert_keyframe(
+        name: str,
+        data_path: str,
+        frame: int,
+        index: int = -1,
+    ) -> dict[str, Any]:
+        """Insert a keyframe for an arbitrary object data path."""
+
+        return client.call(
+            "insert_keyframe",
+            {
+                "name": name,
+                "data_path": data_path,
+                "frame": frame,
+                "index": index,
+            },
+        )
+
+    @server.tool(name="list_animation_data")
+    def list_animation_data(name: str) -> dict[str, Any]:
+        """List animation curves for an object."""
+
+        return client.call("list_animation_data", {"name": name})
+
+    @server.tool(name="add_modifier")
+    def add_modifier(
+        object_name: str,
+        modifier_type: str,
+        name: str | None = None,
+        settings: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Add a modifier to an object and apply optional settings."""
+
+        params: dict[str, Any] = {
+            "object_name": object_name,
+            "modifier_type": modifier_type,
+        }
+        if name is not None:
+            params["name"] = name
+        if settings is not None:
+            params["settings"] = settings
+        return client.call("add_modifier", params)
+
+    @server.tool(name="list_modifiers")
+    def list_modifiers(object_name: str) -> dict[str, Any]:
+        """List modifiers on an object."""
+
+        return client.call("list_modifiers", {"object_name": object_name})
+
+    @server.tool(name="apply_modifier")
+    def apply_modifier(object_name: str, modifier_name: str) -> dict[str, Any]:
+        """Apply a modifier on an object."""
+
+        return client.call(
+            "apply_modifier",
+            {"object_name": object_name, "modifier_name": modifier_name},
+        )
+
+    @server.tool(name="remove_modifier")
+    def remove_modifier(object_name: str, modifier_name: str) -> dict[str, Any]:
+        """Remove a modifier from an object."""
+
+        return client.call(
+            "remove_modifier",
+            {"object_name": object_name, "modifier_name": modifier_name},
+        )
+
+    @server.tool(name="add_constraint")
+    def add_constraint(
+        object_name: str,
+        constraint_type: str,
+        name: str | None = None,
+        target_name: str | None = None,
+    ) -> dict[str, Any]:
+        """Add a constraint to an object and optionally assign target."""
+
+        params: dict[str, Any] = {
+            "object_name": object_name,
+            "constraint_type": constraint_type,
+        }
+        if name is not None:
+            params["name"] = name
+        if target_name is not None:
+            params["target_name"] = target_name
+        return client.call("add_constraint", params)
+
+    @server.tool(name="list_constraints")
+    def list_constraints(object_name: str) -> dict[str, Any]:
+        """List constraints on an object."""
+
+        return client.call("list_constraints", {"object_name": object_name})
+
+    @server.tool(name="remove_constraint")
+    def remove_constraint(object_name: str, constraint_name: str) -> dict[str, Any]:
+        """Remove a constraint from an object."""
+
+        return client.call(
+            "remove_constraint",
+            {"object_name": object_name, "constraint_name": constraint_name},
+        )
 
     @server.tool(name="create_material")
     def create_material(
