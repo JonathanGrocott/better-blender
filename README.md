@@ -6,10 +6,15 @@ Better Blender is a local-first MCP server and Blender add-on bridge for automat
 This repository now includes:
 - `better-blender-mcp` Python package with CLI and MCP server entrypoint.
 - `better_blender_bridge` Blender add-on skeleton with authenticated local socket bridge.
-- Initial MCP tools:
-  - `get_blender_status`
-  - `get_scene_info`
-  - `list_objects`
+- Implemented MCP tools (first functional set):
+  - System: `get_blender_status`
+  - Scene/File: `new_scene`, `open_blend`, `save_blend`, `get_scene_info`, `list_collections`
+  - Objects: `list_objects`, `get_object_info`, `create_primitive`, `delete_object`, `set_object_transform`, `duplicate_object`
+  - Materials: `create_material`, `assign_material`
+  - Camera/Light: `create_camera`, `set_active_camera`, `create_light`
+  - Rendering: `render_still`
+  - I/O: `import_file`, `export_file`
+  - Advanced: `execute_blender_code` (disabled by default, opt-in in add-on preferences)
 - Milestone and protocol docs for completing a production implementation.
 
 ## Quickstart (developer)
@@ -53,6 +58,7 @@ better-blender-mcp doctor
 ## Docs
 - Implementation milestones: `docs/milestone-board.md`
 - Bridge and protocol specification: `docs/spec.md`
+- Blender API alignment map: `docs/blender-api-alignment.md`
 
 ## Development checks
 ```bash

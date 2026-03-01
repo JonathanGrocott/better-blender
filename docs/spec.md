@@ -50,10 +50,28 @@ Failure:
 - Blender API work executes on main thread via timer callback (`bpy.app.timers`).
 - Default bridge timeout is 30 seconds per request.
 
-## Initial Methods
+## Implemented Methods (v0.2)
 - `health`
+- `new_scene`
+- `open_blend`
+- `save_blend`
 - `get_scene_info`
+- `list_collections`
 - `list_objects`
+- `get_object_info`
+- `create_primitive`
+- `delete_object`
+- `set_object_transform`
+- `duplicate_object`
+- `create_material`
+- `assign_material`
+- `create_camera`
+- `set_active_camera`
+- `create_light`
+- `render_still`
+- `import_file`
+- `export_file`
+- `execute_code` (requires add-on preference `allow_unsafe_code=true`)
 
 ## Error Semantics
 - `Unauthorized`: token mismatch.
