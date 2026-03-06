@@ -23,7 +23,7 @@ bl_info = {
     "name": "Better Blender Bridge",
     "author": "Better Blender Contributors",
     "version": (0, 2, 0),
-    "blender": (4, 2, 0),
+    "blender": (3, 4, 1),
     "location": "View3D > Sidebar > Better Blender",
     "description": "Local bridge for Better Blender MCP",
     "category": "Development",

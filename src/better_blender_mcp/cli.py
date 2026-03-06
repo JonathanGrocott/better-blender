@@ -56,7 +56,9 @@ def _build_parser() -> argparse.ArgumentParser:
         "install-addon", help="Install Blender add-on into scripts/addons"
     )
     install_addon.add_argument(
-        "--blender-version", required=True, help="Blender major.minor, example: 4.2"
+        "--blender-version",
+        required=True,
+        help="Blender version (major.minor or major.minor.patch), example: 4.2 or 3.4.1",
     )
     install_addon.add_argument(
         "--destination",
@@ -143,7 +145,13 @@ def _install_addon(version: str, destination: str | None) -> int:
         print(f"Add-on source not found: {addon_source}", file=sys.stderr)
         return 1
 
-    addon_target_dir = Path(destination) if destination else _default_addon_dir(version)
+    try:
+        scripts_version = _normalize_blender_scripts_version(version)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    addon_target_dir = Path(destination) if destination else _default_addon_dir(scripts_version)
     addon_target_dir.mkdir(parents=True, exist_ok=True)
     target = addon_target_dir / "better_blender_bridge"
 
@@ -153,6 +161,20 @@ def _install_addon(version: str, destination: str | None) -> int:
     shutil.copytree(addon_source, target)
     print(f"Installed add-on to: {target}")
     return 0
+
+
+def _normalize_blender_scripts_version(version: str) -> str:
+    trimmed = version.strip()
+    parts = trimmed.split(".")
+    if len(parts) not in {2, 3} or any(not part.isdigit() for part in parts):
+        raise ValueError(
+            "Invalid --blender-version. Expected major.minor or major.minor.patch "
+            "(for example: 4.2 or 3.4.1)."
+        )
+
+    major = int(parts[0])
+    minor = int(parts[1])
+    return f"{major}.{minor}"
 
 
 def _default_addon_dir(version: str) -> Path:

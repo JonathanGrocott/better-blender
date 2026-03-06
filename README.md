@@ -35,7 +35,7 @@ pip install -e .[dev]
 
 ### 2) Install Blender add-on files
 ```bash
-better-blender-mcp install-addon --blender-version 4.2
+better-blender-mcp install-addon --blender-version 3.4.1
 ```
 
 ### 3) Enable add-on in Blender
@@ -51,6 +51,8 @@ better-blender-mcp print-config --client claude-desktop
 
 Copy generated JSON into your MCP client config and set `BETTER_BLENDER_TOKEN` to the same token configured in Blender add-on preferences.
 
+For full client-specific setup (Claude Desktop, VS Code GitHub Copilot, VS Code Continue, Codex), see `docs/client-setup.md`.
+
 ### 5) Run diagnostics
 ```bash
 better-blender-mcp doctor
@@ -60,12 +62,13 @@ better-blender-mcp doctor
 - `better-blender-mcp serve`: run MCP server over stdio.
 - `better-blender-mcp doctor`: print environment diagnostics.
 - `better-blender-mcp print-config --client <target>`: print MCP config snippet.
-- `better-blender-mcp install-addon --blender-version <major.minor>`: copy add-on into user scripts directory.
+- `better-blender-mcp install-addon --blender-version <major.minor[.patch]>`: copy add-on into user scripts directory.
 
 ## Docs
 - Implementation milestones: `docs/milestone-board.md`
 - Bridge and protocol specification: `docs/spec.md`
 - Blender API alignment map: `docs/blender-api-alignment.md`
+- Client setup guide: `docs/client-setup.md`
 
 ## Development checks
 ```bash

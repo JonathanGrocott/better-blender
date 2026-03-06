@@ -53,7 +53,7 @@
 - Scope: Add register/unregister, preferences panel, start/stop operator.
 - Depends on: BB-003
 - DoD:
-  - Add-on install/enable works on Blender 4.2+
+  - Add-on install/enable works on Blender 3.4.1+
   - UI toggles bridge service.
 
 #### BB-011 Main-thread execution queue
