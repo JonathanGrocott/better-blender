@@ -202,7 +202,13 @@ def _require_object(name: Any) -> bpy.types.Object:
     return obj
 
 
+def _require_object_mode() -> None:
+    if bpy.context.mode != "OBJECT":
+        raise ValueError("This operation requires Object Mode. Exit the current mode and retry.")
+
+
 def _set_active_object(obj: bpy.types.Object) -> None:
+    _require_object_mode()
     bpy.ops.object.select_all(action="DESELECT")
     obj.select_set(True)
     bpy.context.view_layer.objects.active = obj
@@ -594,6 +600,7 @@ def _dispatch_command(method: str, params: dict[str, Any]) -> dict[str, Any]:
         return {"object": _serialize_object(obj)}
 
     if method == "create_primitive":
+        _require_object_mode()
         primitive = params.get("primitive", "CUBE")
         if not isinstance(primitive, str):
             raise ValueError("primitive must be a string")
@@ -694,6 +701,7 @@ def _dispatch_command(method: str, params: dict[str, Any]) -> dict[str, Any]:
         return {"object": _serialize_object(obj)}
 
     if method == "duplicate_object":
+        _require_object_mode()
         obj = _require_object(params.get("name"))
         new_name = params.get("new_name")
         linked = bool(params.get("linked", False))

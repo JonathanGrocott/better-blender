@@ -325,3 +325,40 @@ def test_geometry_edits_preserve_existing_output(bridge_client: BlenderBridgeCli
     bridge_client.call("create_geometry_nodes_modifier", params)
     assert bridge_client.call("list_geometry_nodes", params)["links"] == before
     assert any(link["from_node"] == "Transform" for link in before)
+
+
+def test_object_operations_reject_edit_mode() -> None:
+    blender = _find_blender_executable()
+    if blender is None:
+        pytest.skip("Blender executable not available")
+    addon_parent = Path(__file__).resolve().parents[2] / "blender_addon"
+    code = f"import sys; sys.path.insert(0, {str(addon_parent)!r})\n" + """
+import bpy
+import better_blender_bridge as bridge
+obj = bpy.context.active_object
+name = obj.name
+modifier = obj.modifiers.new(name='TestModifier', type='SUBSURF')
+bpy.ops.object.mode_set(mode='EDIT')
+for method, params in [
+    ('create_primitive', {'name': 'MustNotExist'}),
+    ('duplicate_object', {'name': name}),
+    ('apply_modifier', {'object_name': name, 'modifier_name': modifier.name}),
+]:
+    try:
+        bridge._dispatch_command(method, params)
+    except ValueError as exc:
+        assert 'Object Mode' in str(exc)
+    else:
+        raise AssertionError(method + ' unexpectedly succeeded')
+assert bpy.context.mode == 'EDIT_MESH'
+assert obj.name == name
+assert len(bpy.context.scene.objects) == 3
+assert len(obj.modifiers) == 1
+bpy.ops.object.mode_set(mode='OBJECT')
+assert len(obj.data.vertices) == 8
+"""
+    result = subprocess.run(
+        [blender, "--background", "--factory-startup", "--python-exit-code", "1",
+         "--python-expr", code], capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
