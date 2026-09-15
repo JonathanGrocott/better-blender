@@ -82,6 +82,13 @@ class RenderJobs:
                     job["state"] = "failed"
                     job["error"] = error or "Render worker exited without a result"
                 job["finished_at"] = time.time()
+                finished = [
+                    key
+                    for key, value in self.jobs.items()
+                    if value["state"] not in {"running", "cancelling"}
+                ]
+                for key in finished[:-32]:
+                    del self.jobs[key]
         except Exception as exc:
             with self.lock:
                 self.jobs[job_id].update(state="failed", error=str(exc))
@@ -100,8 +107,10 @@ class RenderJobs:
             job = self.jobs[job_id]
             if job["state"] not in {"running", "cancelling"}:
                 return self.status(job_id)
-            job["state"] = "cancelling"
             process = job["process"]
+            if process.poll() is not None:
+                return self.status(job_id)  # The watcher will publish its actual result.
+            job["state"] = "cancelling"
             try:
                 process.terminate()
             except ProcessLookupError:

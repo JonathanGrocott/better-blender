@@ -71,6 +71,8 @@ def bridge_client(tmp_path: Path):
         str(ready_file),
         "--stop-file",
         str(stop_file),
+        "--timeout-seconds",
+        "60",
     ]
 
     process = subprocess.Popen(  # noqa: S603
@@ -96,7 +98,7 @@ def bridge_client(tmp_path: Path):
             raise RuntimeError("Timed out waiting for Blender bridge to become ready")
 
         client = BlenderBridgeClient(
-            BridgeConfig(host="127.0.0.1", port=port, token=token, timeout_seconds=10)
+            BridgeConfig(host="127.0.0.1", port=port, token=token, timeout_seconds=60)
         )
         yield client
     finally:
@@ -637,3 +639,71 @@ def test_glb_export_import_roundtrip(bridge_client: BlenderBridgeClient, tmp_pat
     assert path.read_bytes()[:4] == b"glTF"
     bridge_client.call("new_scene", {"use_empty": True})
     assert bridge_client.call("import_file", {"filepath": str(path)})["objects_total"] == 1
+
+
+def test_transport_capacity_and_read_deadline():
+    blender = _find_blender_executable()
+    if blender is None:
+        pytest.skip("Blender executable not available")
+    addon_parent = Path(__file__).resolve().parents[2] / "blender_addon"
+    code = (
+        f"import sys; sys.path.insert(0, {str(addon_parent)!r})\n"
+        + r"""
+import json
+import socket
+import time
+import better_blender_bridge as bridge
+bridge.MAX_CONNECTIONS = 2
+bridge.MAX_QUEUED_COMMANDS = 1
+bridge.READ_TIMEOUT = 2
+bridge.start_bridge_with_config('127.0.0.1', 0, 'test', register_timer=False)
+runtime = bridge._RUNTIME
+endpoint = runtime.server.server_address
+def wait_for(predicate):
+    deadline = time.monotonic() + 2
+    while not predicate():
+        assert time.monotonic() < deadline
+        time.sleep(.001)
+def read(sock):
+    with sock.makefile('rb') as stream:
+        return json.loads(stream.readline())
+try:
+    with socket.create_connection(endpoint) as a, socket.create_connection(endpoint) as b:
+        wait_for(lambda: runtime.server.slots._value == 0)
+        with socket.create_connection(endpoint) as excess:
+            assert read(excess)['code'] == 'BUSY'
+    wait_for(lambda: runtime.server.slots._value == 2)
+    payload = json.dumps({'id':'a', 'method':'health', 'token':'test',
+                          'timeout_seconds':.5}).encode() + b'\n'
+    with socket.create_connection(endpoint) as a:
+        a.sendall(payload)
+        wait_for(lambda: runtime.command_queue.qsize() == 1)
+        with socket.create_connection(endpoint) as b:
+            b.sendall(payload)
+            assert read(b)['code'] == 'BUSY'
+        assert read(a)['code'] == 'EXPIRED'
+    bridge._drain_command_queue()
+    wait_for(lambda: runtime.server.slots._value == 2)
+    bridge.READ_TIMEOUT = .05
+    with socket.create_connection(endpoint) as slow:
+        slow.sendall(b'{')
+        assert read(slow)['code'] == 'INVALID_REQUEST'
+finally:
+    bridge.stop_bridge()
+"""
+    )
+    result = subprocess.run(
+        [
+            blender,
+            "--background",
+            "--factory-startup",
+            "--python-exit-code",
+            "1",
+            "--python-expr",
+            code,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr

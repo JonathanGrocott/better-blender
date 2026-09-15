@@ -54,6 +54,6 @@ with tempfile.TemporaryDirectory(prefix="bb-wheel-") as work:
         check=True,
     )
     addon = work / "addons/better_blender_bridge"
-    for name in ("__init__.py", "validation.py", "schemas.json"):
+    for name in ("__init__.py", "validation.py", "schemas.json", "jobs.py", "render_worker.py"):
         assert (addon / name).exists(), name
     print("Wheel install and add-on extraction passed")

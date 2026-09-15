@@ -1190,6 +1190,7 @@ def _dispatch_command(method: str, params: dict[str, Any]) -> dict[str, Any]:
 
         new_strip_name = strip_name if isinstance(strip_name, str) and strip_name else action.name
         strip = track.strips.new(new_strip_name, int(frame_start), action)
+        strip.name = new_strip_name
 
         return {
             "object_name": obj.name,
