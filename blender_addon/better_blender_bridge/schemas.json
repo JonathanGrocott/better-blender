@@ -1029,9 +1029,67 @@
     "title": "get_job_statusArguments",
     "type": "object"
   },
+  "get_node_info": {
+    "additionalProperties": false,
+    "properties": {
+      "material_name": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Material Name"
+      },
+      "modifier_name": {
+        "default": "GeometryNodes",
+        "title": "Modifier Name",
+        "type": "string"
+      },
+      "node_name": {
+        "title": "Node Name",
+        "type": "string"
+      },
+      "object_name": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Object Name"
+      },
+      "tree_type": {
+        "default": "GEOMETRY",
+        "enum": [
+          "GEOMETRY",
+          "COMPOSITOR",
+          "MATERIAL"
+        ],
+        "title": "Tree Type",
+        "type": "string"
+      }
+    },
+    "required": [
+      "node_name"
+    ],
+    "title": "get_node_infoArguments",
+    "type": "object"
+  },
   "get_object_info": {
     "additionalProperties": false,
     "properties": {
+      "evaluated": {
+        "default": false,
+        "title": "Evaluated",
+        "type": "boolean"
+      },
       "name": {
         "title": "Name",
         "type": "string"
@@ -1383,7 +1441,50 @@
   },
   "list_objects": {
     "additionalProperties": false,
-    "properties": {},
+    "properties": {
+      "collection_name": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Collection Name"
+      },
+      "limit": {
+        "default": 100,
+        "maximum": 500,
+        "minimum": 1,
+        "title": "Limit",
+        "type": "integer"
+      },
+      "object_type": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Object Type"
+      },
+      "offset": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Offset",
+        "type": "integer"
+      },
+      "query": {
+        "default": "",
+        "title": "Query",
+        "type": "string"
+      }
+    },
     "title": "list_objectsArguments",
     "type": "object"
   },

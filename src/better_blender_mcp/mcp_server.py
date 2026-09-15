@@ -183,16 +183,49 @@ def create_server(client: BlenderBridgeClient) -> Any:
         return await client.acall("set_collection_visibility", params)
 
     @server.tool(name="list_objects")
-    async def list_objects() -> dict[str, Any]:
-        """List objects in the active scene."""
-
-        return await client.acall("list_objects")
+    async def list_objects(
+        query: str = "",
+        object_type: str | None = None,
+        collection_name: str | None = None,
+        offset: Annotated[int, Field(ge=0)] = 0,
+        limit: Annotated[int, Field(ge=1, le=500)] = 100,
+    ) -> dict[str, Any]:
+        """List objects in name order, filtered by substring/type/collection and paginated."""
+        return await client.acall(
+            "list_objects",
+            {
+                "query": query,
+                "object_type": object_type,
+                "collection_name": collection_name,
+                "offset": offset,
+                "limit": limit,
+            },
+        )
 
     @server.tool(name="get_object_info")
-    async def get_object_info(name: str) -> dict[str, Any]:
-        """Get details for a specific object by name."""
+    async def get_object_info(name: str, evaluated: bool = False) -> dict[str, Any]:
+        """Inspect local/world transforms, parenting, visibility and optional evaluated bounds."""
+        return await client.acall("get_object_info", {"name": name, "evaluated": evaluated})
 
-        return await client.acall("get_object_info", {"name": name})
+    @server.tool(name="get_node_info")
+    async def get_node_info(
+        node_name: str,
+        tree_type: Literal["GEOMETRY", "COMPOSITOR", "MATERIAL"] = "GEOMETRY",
+        object_name: str | None = None,
+        modifier_name: str = "GeometryNodes",
+        material_name: str | None = None,
+    ) -> dict[str, Any]:
+        """Inspect node sockets, values and writable RNA properties without editing the tree."""
+        return await client.acall(
+            "get_node_info",
+            {
+                "node_name": node_name,
+                "tree_type": tree_type,
+                "object_name": object_name,
+                "modifier_name": modifier_name,
+                "material_name": material_name,
+            },
+        )
 
     @server.tool(name="create_primitive")
     async def create_primitive(

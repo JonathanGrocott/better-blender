@@ -744,3 +744,26 @@ def test_checkpoint_restores_scene_after_partial_work(bridge_client: BlenderBrid
     )
     assert deleted["result"]["deleted"] == "Recoverable"
     assert bridge_client.call("list_checkpoints")["total"] == 3
+
+
+def test_scene_and_node_inspection(bridge_client: BlenderBridgeClient):
+    for name in ("InspectA", "InspectB", "InspectC"):
+        bridge_client.call("create_primitive", {"name": name, "location": [2, 0, 0]})
+    page = bridge_client.call("list_objects", {"query": "Inspect", "limit": 2})
+    assert page["total"] == 3 and page["next_offset"] == 2
+    assert [obj["name"] for obj in page["objects"]] == ["InspectA", "InspectB"]
+    assert bridge_client.call("list_objects", {"query": "Inspect", "offset": 2})["count"] == 1
+    obj = bridge_client.call("get_object_info", {"name": "InspectA", "evaluated": True})["object"]
+    assert obj["matrix_world"][0][3] == 2
+    assert obj["evaluated_world_bounds"]["min"] == [1, -1, -1]
+    assert obj["collections"] and obj["visible"]
+    bridge_client.call("create_geometry_nodes_modifier", {"object_name": "InspectA"})
+    node = bridge_client.call(
+        "get_node_info",
+        {
+            "object_name": "InspectA",
+            "node_name": "Group Input",
+        },
+    )
+    assert any(socket["name"] == "Geometry" for socket in node["outputs"])
+    assert any(prop["name"] == "label" for prop in node["properties"])

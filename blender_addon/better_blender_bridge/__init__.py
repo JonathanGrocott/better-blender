@@ -22,7 +22,7 @@ from typing import Any
 import bpy
 from mathutils import Quaternion, Vector
 
-from . import checkpoints
+from . import checkpoints, inspection
 from .jobs import RenderJobs
 from .validation import validate_command
 
@@ -313,6 +313,7 @@ def _serialize_object(obj: bpy.types.Object) -> dict[str, Any]:
         "scale": [float(v) for v in obj.scale],
         "dimensions": [float(v) for v in obj.dimensions],
         "materials": materials,
+        **inspection.object_details(obj),
     }
 
 
@@ -873,13 +874,52 @@ def _dispatch_command(method: str, params: dict[str, Any]) -> dict[str, Any]:
         }
 
     if method == "list_objects":
-        scene = bpy.context.scene
-        objects = [_serialize_object(obj) for obj in scene.objects]
-        return {"objects": objects, "count": len(objects)}
+        query = params.get("query", "").casefold()
+        object_type = params.get("object_type")
+        collection = params.get("collection_name")
+        if collection is not None:
+            _require_collection(collection)
+        matches = sorted(
+            (
+                obj
+                for obj in bpy.context.scene.objects
+                if query in obj.name.casefold()
+                and (not object_type or obj.type == object_type.upper())
+                and (collection is None or collection in {c.name for c in obj.users_collection})
+            ),
+            key=lambda obj: obj.name,
+        )
+        offset, limit = params.get("offset", 0), params.get("limit", 100)
+        objects = [_serialize_object(obj) for obj in matches[offset : offset + limit]]
+        return {
+            "objects": objects,
+            "count": len(objects),
+            "total": len(matches),
+            "next_offset": offset + limit if offset + limit < len(matches) else None,
+        }
 
     if method == "get_object_info":
         obj = _require_object(params.get("name"))
-        return {"object": _serialize_object(obj)}
+        return {
+            "object": {
+                **_serialize_object(obj),
+                **inspection.object_details(obj, params.get("evaluated", False)),
+            }
+        }
+
+    if method == "get_node_info":
+        tree_type = params.get("tree_type", "GEOMETRY")
+        if tree_type == "GEOMETRY":
+            obj = _require_object(params.get("object_name"))
+            modifier = _require_modifier(obj, params.get("modifier_name", "GeometryNodes"))
+            tree = modifier.node_group if modifier.type == "NODES" else None
+        elif tree_type == "MATERIAL":
+            tree = _require_material(params.get("material_name")).node_tree
+        else:
+            tree = _require_node_tree(bpy.context.scene)
+        if tree is None:
+            raise ValueError("Node tree is not configured")
+        return inspection.node_details(tree, params["node_name"])
 
     if method == "create_primitive":
         _require_object_mode()
@@ -2434,6 +2474,7 @@ def _supported_methods() -> list[str]:
         "save_blend",
         "get_scene_info",
         "set_timeline",
+        "get_node_info",
         "list_objects",
         "get_object_info",
         "create_primitive",
