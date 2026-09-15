@@ -2672,6 +2672,11 @@ def start_bridge_with_config(
 
 def stop_bridge() -> None:
     global _RUNTIME
+    global _TIMER_REGISTERED
+
+    if bpy.app.timers.is_registered(_drain_command_queue):
+        bpy.app.timers.unregister(_drain_command_queue)
+    _TIMER_REGISTERED = False
 
     if _RUNTIME is None:
         return

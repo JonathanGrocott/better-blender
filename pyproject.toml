@@ -47,6 +47,7 @@ addopts = "-q -m 'not integration'"
 testpaths = ["tests"]
 markers = [
   "integration: end-to-end tests that require a Blender executable",
+  "gui: tests using a real Blender window (Linux requires DISPLAY)",
 ]
 
 [tool.mypy]

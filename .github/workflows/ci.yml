@@ -57,7 +57,7 @@ jobs:
       - name: Install Blender
         run: |
           sudo apt-get update
-          sudo apt-get install -y libx11-6 libxi6 libxxf86vm1 libxfixes3 libxrender1 libgl1 libegl1 libsm6
+          sudo apt-get install -y libx11-6 libxi6 libxxf86vm1 libxfixes3 libxrender1 libgl1 libegl1 libsm6 xvfb xauth libgl1-mesa-dri
           curl --fail --location --retry 3 --output /tmp/blender.tar.xz \
             "https://download.blender.org/release/Blender${{ matrix.series }}/blender-${{ matrix.blender }}-linux-x64.tar.xz"
           mkdir -p "$RUNNER_TEMP/blender"
@@ -71,4 +71,9 @@ jobs:
           pip install -e .[dev]
 
       - name: Run integration tests
-        run: pytest -m integration
+        run: pytest -m 'integration and not gui'
+
+      - name: Real Blender UI lifecycle
+        env:
+          LIBGL_ALWAYS_SOFTWARE: "1"
+        run: xvfb-run -a -s "-screen 0 1024x768x24" pytest -m gui
