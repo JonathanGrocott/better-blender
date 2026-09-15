@@ -7,6 +7,7 @@ All bpy operations execute on Blender's main thread through a timer-drained queu
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import math
 import queue
@@ -24,6 +25,7 @@ from mathutils import Quaternion, Vector
 
 from . import checkpoints, inspection
 from .jobs import RenderJobs
+from .storage import state_directory
 from .validation import validate_command
 
 bl_info = {
@@ -153,17 +155,24 @@ class _BridgeRequestHandler(socketserver.StreamRequestHandler):
             self._write({"id": request_id, "ok": False, "error": "params must be an object"})
             return
 
-        if method in {"get_job_status", "cancel_job"}:
+        if method in {"get_job_status", "cancel_job", "list_jobs", "get_job_image"}:
             try:
                 validate_command(method, params)
-                operation = (
-                    runtime.render_jobs.status
-                    if method == "get_job_status"
-                    else (runtime.render_jobs.cancel)
-                )
-                result = operation(params["job_id"])
+                if method == "list_jobs":
+                    result = runtime.render_jobs.list_jobs(
+                        params.get("offset", 0), params.get("limit", 50)
+                    )
+                elif method == "get_job_image":
+                    result = runtime.render_jobs.image(params["job_id"], params.get("index", 0))
+                else:
+                    operation = (
+                        runtime.render_jobs.status
+                        if method == "get_job_status"
+                        else runtime.render_jobs.cancel
+                    )
+                    result = operation(params["job_id"])
                 self._write({"id": request_id, "ok": True, "result": result})
-            except ValueError as exc:
+            except (ValueError, OSError) as exc:
                 self._write({"id": request_id, "ok": False, "error": str(exc)})
             return
 
@@ -2466,6 +2475,8 @@ def _supported_methods() -> list[str]:
         "restore_checkpoint",
         "run_with_checkpoint",
         "start_render_job",
+        "list_jobs",
+        "get_job_image",
         "get_job_status",
         "cancel_job",
         "health",
@@ -2643,6 +2654,8 @@ def start_bridge_with_config(
     )
 
     server = _BridgeTCPServer((runtime.host, runtime.port), _BridgeRequestHandler, runtime)
+    namespace = hashlib.sha256(f"{host}:{server.server_address[1]}".encode()).hexdigest()[:16]
+    runtime.render_jobs = RenderJobs(state_directory() / "jobs" / namespace)
     thread = threading.Thread(
         target=server.serve_forever,
         name="better-blender-bridge",

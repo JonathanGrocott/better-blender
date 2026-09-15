@@ -1,5 +1,6 @@
 """Bounded render jobs in isolated Blender processes; no bpy access in worker threads."""
 
+import base64
 import json
 import shutil
 import subprocess
@@ -8,12 +9,43 @@ import time
 import uuid
 from pathlib import Path
 
+from .storage import write_json
+
 
 class RenderJobs:
-    def __init__(self):
+    def __init__(self, storage=None):
         self.lock = threading.RLock()
         self.jobs = {}
         self.closed = False
+        self.storage = Path(storage) if storage else None
+        self.watchers = []
+        if self.storage:
+            self.storage.mkdir(parents=True, exist_ok=True)
+            for path in self.storage.glob("*.json"):
+                try:
+                    job = json.loads(path.read_text())
+                    if job["state"] in {"running", "cancelling"}:
+                        job.update(
+                            state="interrupted", error="Bridge stopped before recording completion"
+                        )
+                    self.jobs[job["job_id"]] = job
+                except (ValueError, KeyError, OSError):
+                    continue
+
+    def _persist(self, job):
+        if self.storage:
+            write_json(self.storage / (job["job_id"] + ".json"), self._public(job))
+
+    @staticmethod
+    def _public(job):
+        return {
+            key: value for key, value in job.items() if key != "process" and not key.startswith("_")
+        }
+
+    def _forget(self, key):
+        del self.jobs[key]
+        if self.storage:
+            (self.storage / (key + ".json")).unlink(missing_ok=True)
 
     def submit(self, binary, snapshot, request, directory):
         with self.lock:
@@ -25,7 +57,7 @@ class RenderJobs:
                 key for key, j in self.jobs.items() if j["state"] not in {"running", "cancelling"}
             ]
             for key in finished[:-31]:
-                del self.jobs[key]
+                self._forget(key)
             directory = Path(directory)
             request_path = directory / "request.json"
             result_path = directory / "result.json"
@@ -57,8 +89,13 @@ class RenderJobs:
                 "result": None,
                 "error": None,
                 "process": process,
+                "_directory": directory,
+                "progress": {"frames_completed": 0, "fraction": None},
             }
-            threading.Thread(target=self._watch, args=(job_id, directory), daemon=True).start()
+            self._persist(self.jobs[job_id])
+            watcher = threading.Thread(target=self._watch, args=(job_id, directory), daemon=True)
+            self.watchers.append(watcher)
+            watcher.start()
             return self.status(job_id)
 
     def _watch(self, job_id, directory):
@@ -78,20 +115,26 @@ class RenderJobs:
                 elif process.returncode == 0 and isinstance(result, dict):
                     job["state"] = "completed"
                     job["result"] = result
+                    job["progress"] = {
+                        "frames_completed": result.get("frames_written"),
+                        "fraction": 1.0,
+                    }
                 else:
                     job["state"] = "failed"
                     job["error"] = error or "Render worker exited without a result"
                 job["finished_at"] = time.time()
+                self._persist(job)
                 finished = [
                     key
                     for key, value in self.jobs.items()
                     if value["state"] not in {"running", "cancelling"}
                 ]
                 for key in finished[:-32]:
-                    del self.jobs[key]
+                    self._forget(key)
         except Exception as exc:
             with self.lock:
                 self.jobs[job_id].update(state="failed", error=str(exc))
+                self._persist(self.jobs[job_id])
         finally:
             shutil.rmtree(directory, ignore_errors=True)
 
@@ -99,7 +142,13 @@ class RenderJobs:
         with self.lock:
             if job_id not in self.jobs:
                 raise ValueError(f"Unknown or expired job: {job_id}")
-            return {key: value for key, value in self.jobs[job_id].items() if key != "process"}
+            job = self.jobs[job_id]
+            if job["state"] in {"running", "cancelling"} and "_directory" in job:
+                try:
+                    job["progress"] = json.loads((job["_directory"] / "progress.json").read_text())
+                except (OSError, ValueError):
+                    pass
+            return self._public(job)
 
     def cancel(self, job_id):
         with self.lock:
@@ -111,6 +160,7 @@ class RenderJobs:
             if process.poll() is not None:
                 return self.status(job_id)  # The watcher will publish its actual result.
             job["state"] = "cancelling"
+            self._persist(job)
             try:
                 process.terminate()
             except ProcessLookupError:
@@ -135,3 +185,36 @@ class RenderJobs:
             ids = list(self.jobs)
         for job_id in ids:
             self.cancel(job_id)
+        for watcher in self.watchers:
+            watcher.join(timeout=3)
+
+    def list_jobs(self, offset=0, limit=50):
+        with self.lock:
+            jobs = sorted(self.jobs.values(), key=lambda j: j["created_at"], reverse=True)
+            return {
+                "jobs": [self.status(j["job_id"]) for j in jobs[offset : offset + limit]],
+                "total": len(jobs),
+                "next_offset": offset + limit if offset + limit < len(jobs) else None,
+            }
+
+    def image(self, job_id, index=0):
+        job = self.status(job_id)
+        outputs = (job.get("result") or {}).get("outputs", [])
+        if index < 0 or index >= len(outputs):
+            raise ValueError("No image at this index; inspect completed job outputs")
+        path = Path(outputs[index])
+        mime = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}.get(
+            path.suffix.lower()
+        )
+        if mime is None:
+            raise ValueError("Inline images support PNG and JPEG outputs")
+        if not path.is_file() or path.stat().st_size > 8 * 1024 * 1024:
+            raise ValueError("Output missing or exceeds the 8 MiB inline image limit")
+        return {
+            "job_id": job_id,
+            "filepath": str(path),
+            "image": {
+                "mime_type": mime,
+                "data": base64.b64encode(path.read_bytes()).decode("ascii"),
+            },
+        }

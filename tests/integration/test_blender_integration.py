@@ -540,6 +540,13 @@ def test_render_job_completion_and_cancellation(bridge_client: BlenderBridgeClie
     completed = wait_terminal(job["job_id"])
     assert completed["state"] == "completed", completed
     assert completed["result"]["rendered"] is True
+    assert completed["progress"]["fraction"] == 1.0
+    assert completed["result"]["outputs"] == [str(output)]
+    assert bridge_client.call("list_jobs")["total"] == 1
+    assert (
+        bridge_client.call("get_job_image", {"job_id": job["job_id"]})["image"]["mime_type"]
+        == "image/png"
+    )
     assert output.exists()
     assert bridge_client.call("get_scene_info") == before
     job = bridge_client.call(

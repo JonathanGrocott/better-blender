@@ -1067,7 +1067,7 @@ def create_server(client: BlenderBridgeClient) -> Any:
 
     @server.tool(name="get_job_status")
     async def get_job_status(job_id: str) -> dict[str, Any]:
-        """Get job state/result/error. Retained for 32 finished jobs or until bridge restart."""
+        """Get job state, frame progress and result. The last 32 completed jobs survive restart."""
         return await client.acall("get_job_status", {"job_id": job_id})
 
     @server.tool(name="cancel_job")
@@ -1127,6 +1127,30 @@ def create_server(client: BlenderBridgeClient) -> Any:
                 "params": params,
                 "label": label,
             },
+        )
+
+    @server.tool(name="list_jobs")
+    async def list_jobs(
+        offset: Annotated[int, Field(ge=0)] = 0,
+        limit: Annotated[int, Field(ge=1, le=100)] = 50,
+    ) -> dict[str, Any]:
+        """List render jobs with frame progress and persisted terminal history."""
+        return await client.acall("list_jobs", {"offset": offset, "limit": limit})
+
+    @server.tool(name="get_job_image")
+    async def get_job_image(
+        job_id: str,
+        index: Annotated[int, Field(ge=0)] = 0,
+    ) -> CallToolResult:
+        """Retrieve a PNG/JPEG render output by index as an inline image, up to 8 MiB."""
+        result = await client.acall("get_job_image", {"job_id": job_id, "index": index})
+        image = result.pop("image")
+        return CallToolResult(
+            content=[
+                TextContent(type="text", text=json.dumps(result)),
+                ImageContent(type="image", data=image["data"], mimeType=image["mime_type"]),
+            ],
+            structuredContent=result,
         )
 
     return server

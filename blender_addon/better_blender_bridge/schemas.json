@@ -1015,6 +1015,26 @@
     "title": "export_fileArguments",
     "type": "object"
   },
+  "get_job_image": {
+    "additionalProperties": false,
+    "properties": {
+      "index": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Index",
+        "type": "integer"
+      },
+      "job_id": {
+        "title": "Job Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "job_id"
+    ],
+    "title": "get_job_imageArguments",
+    "type": "object"
+  },
   "get_job_status": {
     "additionalProperties": false,
     "properties": {
@@ -1409,6 +1429,26 @@
       "object_name"
     ],
     "title": "list_geometry_nodesArguments",
+    "type": "object"
+  },
+  "list_jobs": {
+    "additionalProperties": false,
+    "properties": {
+      "limit": {
+        "default": 50,
+        "maximum": 100,
+        "minimum": 1,
+        "title": "Limit",
+        "type": "integer"
+      },
+      "offset": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Offset",
+        "type": "integer"
+      }
+    },
+    "title": "list_jobsArguments",
     "type": "object"
   },
   "list_modifiers": {
