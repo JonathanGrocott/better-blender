@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 from typing import Annotated, Any, Literal
 
+from mcp.types import CallToolResult, ImageContent, TextContent
 from pydantic import Field
 
 from better_blender_mcp.bridge_client import BlenderBridgeClient
@@ -826,7 +828,7 @@ def create_server(client: BlenderBridgeClient) -> Any:
         engine: str | None = None,
         samples: PositiveInt | None = None,
         fallback_to_render: bool = True,
-    ) -> dict[str, Any]:
+    ) -> CallToolResult:
         """Capture viewport image; fall back to regular render in headless mode."""
 
         params: dict[str, Any] = {
@@ -853,7 +855,17 @@ def create_server(client: BlenderBridgeClient) -> Any:
             params["engine"] = engine
         if samples is not None:
             params["samples"] = samples
-        return await client.acall("capture_viewport_screenshot", params)
+        result = await client.acall("capture_viewport_screenshot", params)
+        image = result.pop("image", None)
+        response = CallToolResult(
+            content=[TextContent(type="text", text=json.dumps(result))],
+            structuredContent=result,
+        )
+        if image is not None:
+            response.content.append(
+                ImageContent(type="image", data=image["data"], mimeType=image["mime_type"])
+            )
+        return response
 
     @server.tool(name="workflow_setup_studio")
     async def workflow_setup_studio(

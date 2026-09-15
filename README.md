@@ -80,3 +80,20 @@ pytest
 ## Headless integration tests
 - Local: `pytest -m integration`
 - CI: `.github/workflows/ci.yml` includes `integration-blender` job that installs Blender and runs end-to-end bridge/operator tests.
+
+## Reliable automation
+
+- MCP render tools return a `job_id`. Use `get_job_status` to poll, and `cancel_job`
+  to stop a worker. Renders use an isolated snapshot and do not modify the open scene.
+  Two workers may run concurrently; cancellation retains any frames already written.
+- Viewport capture returns an inline PNG image plus the saved path. Images over 8 MiB
+  return the path and a request to reduce resolution instead of an oversized preview.
+- Transform vectors have exactly three finite numbers. Euler rotations use radians.
+  Invalid input and unknown modifier settings are rejected. Regenerate bridge schemas
+  after editing tool signatures with `python scripts/update_tool_schemas.py`.
+- `doctor` verifies the running bridge, authentication and protocol compatibility.
+- Wheels include the Blender add-on; a source checkout is no longer required to install it.
+- CI tests Blender 3.4.1, 4.2.0 and 5.0.1, including a real MCP stdio session.
+
+After updating, reinstall the add-on and restart Blender and the MCP server so both
+sides use the same protocol and schemas.

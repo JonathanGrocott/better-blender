@@ -32,8 +32,21 @@ jobs:
       - name: Pytest
         run: pytest
 
+      - name: Wheel installation smoke test
+        run: python scripts/check_wheel.py
+
   integration-blender:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - blender: "3.4.1"
+            series: "3.4"
+          - blender: "4.2.0"
+            series: "4.2"
+          - blender: "5.0.1"
+            series: "5.0"
     steps:
       - uses: actions/checkout@v4
 
@@ -44,8 +57,13 @@ jobs:
       - name: Install Blender
         run: |
           sudo apt-get update
-          sudo apt-get install -y blender
-          blender --version
+          sudo apt-get install -y libx11-6 libxi6 libxxf86vm1 libxfixes3 libxrender1 libgl1 libegl1 libsm6
+          curl --fail --location --retry 3 --output /tmp/blender.tar.xz \
+            "https://download.blender.org/release/Blender${{ matrix.series }}/blender-${{ matrix.blender }}-linux-x64.tar.xz"
+          mkdir -p "$RUNNER_TEMP/blender"
+          tar -xf /tmp/blender.tar.xz -C "$RUNNER_TEMP/blender" --strip-components=1
+          echo "$RUNNER_TEMP/blender" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/blender/blender" --version
 
       - name: Install dependencies
         run: |

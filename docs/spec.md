@@ -155,3 +155,14 @@ External assets must remain available while the job runs. Two render workers may
 at once. The bridge keeps 32 completed job records in memory; restart clears history
 and stops workers. Temporary snapshots are removed after completion. Existing direct
 bridge render methods remain synchronous for compatibility.
+
+## Resource limits and message validation
+
+The bridge allows 16 simultaneous connections and 128 queued commands. Requests are
+limited to 1 MiB and have a five-second read deadline; responses are limited to 16 MiB.
+Excess capacity returns `BUSY`. The client uses buffered reads with an absolute deadline,
+rejects truncated messages and validates response envelopes. Protocol/transport failures
+have stable error codes on `BridgeError.code`. Screenshots carry at most 8 MiB of image
+bytes before base64 encoding. Normal scene tool requests use generated strict input
+schemas, with reference checks before mutation. These checks are not a transaction or
+rollback guarantee for arbitrary Blender operator failures or unsafe Python execution.

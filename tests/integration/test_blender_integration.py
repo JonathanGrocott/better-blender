@@ -554,3 +554,86 @@ def test_render_job_completion_and_cancellation(bridge_client: BlenderBridgeClie
     bridge_client.call("cancel_job", {"job_id": job["job_id"]})
     assert wait_terminal(job["job_id"])["state"] == "cancelled"
     assert bridge_client.call("health")["bridge_running"] is True
+
+
+def test_mcp_stdio_handshake_validation_and_image(
+    bridge_client: BlenderBridgeClient, tmp_path: Path
+):
+    import asyncio
+    import base64
+    import sys
+
+    from mcp import ClientSession, StdioServerParameters
+    from mcp.client.stdio import stdio_client
+
+    bridge_client.call("workflow_setup_studio", {"object_name": "McpSubject"})
+
+    async def check():
+        config = bridge_client.config
+        server = StdioServerParameters(
+            command=sys.executable,
+            args=[
+                "-m",
+                "better_blender_mcp.cli",
+                "serve",
+            ],
+            env={
+                **os.environ,
+                "BETTER_BLENDER_HOST": config.host,
+                "BETTER_BLENDER_PORT": str(config.port),
+                "BETTER_BLENDER_TOKEN": config.token,
+            },
+        )
+        async with stdio_client(server) as (read, write):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                tools = await session.list_tools()
+                assert any(t.name == "cancel_job" for t in tools.tools)
+                health = await session.call_tool("get_blender_status", {})
+                assert not health.isError
+                invalid = await session.call_tool(
+                    "set_object_transform",
+                    {
+                        "name": "McpSubject",
+                        "location": [1, 2],
+                    },
+                )
+                assert invalid.isError
+                capture = await session.call_tool(
+                    "capture_viewport_screenshot",
+                    {
+                        "filepath": str(tmp_path / "mcp.png"),
+                        "engine": "BLENDER_WORKBENCH",
+                        "resolution_x": 64,
+                        "resolution_y": 64,
+                    },
+                )
+                assert not capture.isError, capture
+                image = next(c for c in capture.content if c.type == "image")
+                assert image.mimeType == "image/png"
+                assert base64.b64decode(image.data).startswith(b"\x89PNG\r\n\x1a\n")
+                job = await session.call_tool(
+                    "render_still",
+                    {
+                        "filepath": str(tmp_path / "mcp-job.png"),
+                        "engine": "BLENDER_WORKBENCH",
+                        "resolution_x": 64,
+                        "resolution_y": 64,
+                    },
+                )
+                assert not job.isError
+                assert job.structuredContent["job_id"]
+                await session.call_tool("cancel_job", {"job_id": job.structuredContent["job_id"]})
+
+    asyncio.run(check())
+
+
+def test_glb_export_import_roundtrip(bridge_client: BlenderBridgeClient, tmp_path: Path):
+    bridge_client.call("new_scene", {"use_empty": True})
+    bridge_client.call("create_primitive", {"name": "RoundTrip"})
+    path = tmp_path / "scene.glb"
+    result = bridge_client.call("export_file", {"filepath": str(path)})
+    assert result["filepath"] == str(path)
+    assert path.read_bytes()[:4] == b"glTF"
+    bridge_client.call("new_scene", {"use_empty": True})
+    assert bridge_client.call("import_file", {"filepath": str(path)})["objects_total"] == 1

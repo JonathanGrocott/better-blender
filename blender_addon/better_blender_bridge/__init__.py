@@ -6,6 +6,7 @@ All bpy operations execute on Blender's main thread through a timer-drained queu
 
 from __future__ import annotations
 
+import base64
 import json
 import math
 import queue
@@ -290,6 +291,7 @@ def _resolve_file_type(filepath: str, file_type: Any) -> str:
     else:
         normalized = Path(filepath).suffix.replace(".", "").upper()
 
+    normalized = {"GLB": "GLTF", "USDA": "USD", "USDC": "USD"}.get(normalized, normalized)
     supported = {"OBJ", "FBX", "GLTF", "USD"}
     if normalized not in supported:
         raise ValueError(f"Unsupported file type '{normalized}'. Supported: {sorted(supported)}")
@@ -640,6 +642,71 @@ def _find_view3d_context() -> (
 
             return window, area, region, space, region_3d
     return None
+
+
+def _capture_viewport(params: dict[str, Any]) -> dict[str, Any]:
+    filepath = _normalize_path(params.get("filepath"), require_exists=False)
+    Path(filepath).parent.mkdir(parents=True, exist_ok=True)
+    context = _find_view3d_context()
+    fallback_to_render = bool(params.get("fallback_to_render", True))
+
+    if bpy.app.background:
+        context = None
+
+    if context is None:
+        if not fallback_to_render:
+            raise ValueError("No VIEW_3D viewport context available (likely headless mode)")
+
+        render_params: dict[str, Any] = {"filepath": filepath}
+        for key in ("engine", "resolution_x", "resolution_y", "samples"):
+            if key in params:
+                render_params[key] = params[key]
+        result = _dispatch_command("render_still", render_params)
+        result["capture_mode"] = "render_fallback_no_viewport"
+        result["viewport_available"] = False
+        result["captured"] = True
+        return result
+
+    window, area, region, _, _ = context
+
+    view_params: dict[str, Any] = {}
+    for key in (
+        "view",
+        "location",
+        "rotation_quaternion",
+        "distance",
+        "lens",
+        "shading_type",
+    ):
+        if key in params:
+            view_params[key] = params[key]
+    if view_params:
+        _dispatch_command("set_viewport_view", view_params)
+
+    scene = bpy.context.scene
+    old_filepath = scene.render.filepath
+    old_res_x = scene.render.resolution_x
+    old_res_y = scene.render.resolution_y
+    try:
+        scene.render.filepath = filepath
+        if isinstance(params.get("resolution_x"), int) and params.get("resolution_x") > 0:
+            scene.render.resolution_x = int(params.get("resolution_x"))
+        if isinstance(params.get("resolution_y"), int) and params.get("resolution_y") > 0:
+            scene.render.resolution_y = int(params.get("resolution_y"))
+
+        with bpy.context.temp_override(window=window, area=area, region=region):
+            bpy.ops.render.opengl(write_still=True, view_context=True)
+    finally:
+        scene.render.filepath = old_filepath
+        scene.render.resolution_x = old_res_x
+        scene.render.resolution_y = old_res_y
+
+    return {
+        "captured": True,
+        "filepath": filepath,
+        "capture_mode": "viewport_opengl",
+        "viewport_available": True,
+    }
 
 
 def _require_material(name: str) -> bpy.types.Material:
@@ -1893,68 +1960,26 @@ def _dispatch_command(method: str, params: dict[str, Any]) -> dict[str, Any]:
         }
 
     if method == "capture_viewport_screenshot":
-        filepath = _normalize_path(params.get("filepath"), require_exists=False)
-        Path(filepath).parent.mkdir(parents=True, exist_ok=True)
-        context = _find_view3d_context()
-        fallback_to_render = bool(params.get("fallback_to_render", True))
-
-        if bpy.app.background:
-            context = None
-
-        if context is None:
-            if not fallback_to_render:
-                raise ValueError("No VIEW_3D viewport context available (likely headless mode)")
-
-            render_params: dict[str, Any] = {"filepath": filepath}
-            for key in ("engine", "resolution_x", "resolution_y", "samples"):
-                if key in params:
-                    render_params[key] = params[key]
-            result = _dispatch_command("render_still", render_params)
-            result["capture_mode"] = "render_fallback_no_viewport"
-            result["viewport_available"] = False
-            result["captured"] = True
-            return result
-
-        window, area, region, _, _ = context
-
-        view_params: dict[str, Any] = {}
-        for key in (
-            "view",
-            "location",
-            "rotation_quaternion",
-            "distance",
-            "lens",
-            "shading_type",
-        ):
-            if key in params:
-                view_params[key] = params[key]
-        if view_params:
-            _dispatch_command("set_viewport_view", view_params)
-
-        scene = bpy.context.scene
-        old_filepath = scene.render.filepath
-        old_res_x = scene.render.resolution_x
-        old_res_y = scene.render.resolution_y
+        render = bpy.context.scene.render
+        previous = (render.image_settings.file_format, render.resolution_percentage)
+        render.image_settings.file_format = "PNG"
+        render.resolution_percentage = 100
+        params = {**params, "filepath": str(Path(params["filepath"]).with_suffix(".png"))}
         try:
-            scene.render.filepath = filepath
-            if isinstance(params.get("resolution_x"), int) and params.get("resolution_x") > 0:
-                scene.render.resolution_x = int(params.get("resolution_x"))
-            if isinstance(params.get("resolution_y"), int) and params.get("resolution_y") > 0:
-                scene.render.resolution_y = int(params.get("resolution_y"))
-
-            with bpy.context.temp_override(window=window, area=area, region=region):
-                bpy.ops.render.opengl(write_still=True, view_context=True)
+            result = _capture_viewport(params)
         finally:
-            scene.render.filepath = old_filepath
-            scene.render.resolution_x = old_res_x
-            scene.render.resolution_y = old_res_y
-
-        return {
-            "captured": True,
-            "filepath": filepath,
-            "capture_mode": "viewport_opengl",
-            "viewport_available": True,
-        }
+            render.image_settings.file_format, render.resolution_percentage = previous
+        path = Path(result["filepath"])
+        if path.stat().st_size <= 8 * 1024 * 1024:
+            result["image"] = {
+                "mime_type": "image/png",
+                "data": base64.b64encode(path.read_bytes()).decode("ascii"),
+            }
+        else:
+            result["image_error"] = (
+                "Image exceeds 8 MiB; reduce capture resolution for inline preview"
+            )
+        return result
 
     if method == "workflow_setup_studio":
         object_name = params.get("object_name", "Subject")
@@ -2211,7 +2236,17 @@ def _dispatch_command(method: str, params: dict[str, Any]) -> dict[str, Any]:
         elif file_type == "FBX":
             bpy.ops.export_scene.fbx(filepath=filepath, use_selection=use_selection)
         elif file_type == "GLTF":
-            bpy.ops.export_scene.gltf(filepath=filepath, export_selected=use_selection)
+            operator = bpy.ops.export_scene.gltf
+            selection_key = (
+                "use_selection"
+                if "use_selection" in operator.get_rna_type().properties
+                else "export_selected"
+            )
+            operator(
+                filepath=filepath,
+                **{selection_key: use_selection},
+                export_format="GLB" if Path(filepath).suffix.lower() == ".glb" else "GLTF_SEPARATE",
+            )
         else:
             bpy.ops.wm.usd_export(filepath=filepath, selected_objects_only=use_selection)
 
