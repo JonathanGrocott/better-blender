@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import socket
 import uuid
@@ -21,6 +22,13 @@ class BlenderBridgeClient:
     """Simple request/response client over local TCP with newline-delimited JSON."""
 
     config: BridgeConfig
+
+    async def acall(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Wait for bridge I/O without blocking the MCP event loop.
+
+        Cancelling the await does not cancel a command already executing in Blender.
+        """
+        return await asyncio.to_thread(self.call, method, params)
 
     def call(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         request = BridgeRequest(

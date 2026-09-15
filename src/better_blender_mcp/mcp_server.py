@@ -21,40 +21,40 @@ def create_server(client: BlenderBridgeClient) -> Any:
     server = FastMCP("better-blender")
 
     @server.tool(name="get_blender_status")
-    def get_blender_status() -> dict[str, Any]:
+    async def get_blender_status() -> dict[str, Any]:
         """Return bridge and Blender runtime status."""
 
-        return client.call("health")
+        return await client.acall("health")
 
     @server.tool(name="new_scene")
-    def new_scene(use_empty: bool = True) -> dict[str, Any]:
+    async def new_scene(use_empty: bool = True) -> dict[str, Any]:
         """Create a new Blender scene from the default or empty template."""
 
-        return client.call("new_scene", {"use_empty": use_empty})
+        return await client.acall("new_scene", {"use_empty": use_empty})
 
     @server.tool(name="open_blend")
-    def open_blend(filepath: str) -> dict[str, Any]:
+    async def open_blend(filepath: str) -> dict[str, Any]:
         """Open an existing .blend file from an absolute path."""
 
-        return client.call("open_blend", {"filepath": filepath})
+        return await client.acall("open_blend", {"filepath": filepath})
 
     @server.tool(name="save_blend")
-    def save_blend(filepath: str | None = None) -> dict[str, Any]:
+    async def save_blend(filepath: str | None = None) -> dict[str, Any]:
         """Save the current .blend file, optionally to a new path."""
 
         params: dict[str, Any] = {}
         if filepath is not None:
             params["filepath"] = filepath
-        return client.call("save_blend", params)
+        return await client.acall("save_blend", params)
 
     @server.tool(name="get_scene_info")
-    def get_scene_info() -> dict[str, Any]:
+    async def get_scene_info() -> dict[str, Any]:
         """Return active scene metadata."""
 
-        return client.call("get_scene_info")
+        return await client.acall("get_scene_info")
 
     @server.tool(name="set_timeline")
-    def set_timeline(
+    async def set_timeline(
         frame_start: int | None = None,
         frame_end: int | None = None,
         frame_current: int | None = None,
@@ -71,16 +71,16 @@ def create_server(client: BlenderBridgeClient) -> Any:
             params["frame_current"] = frame_current
         if fps is not None:
             params["fps"] = fps
-        return client.call("set_timeline", params)
+        return await client.acall("set_timeline", params)
 
     @server.tool(name="list_collections")
-    def list_collections() -> dict[str, Any]:
+    async def list_collections() -> dict[str, Any]:
         """List scene collections and object counts."""
 
-        return client.call("list_collections")
+        return await client.acall("list_collections")
 
     @server.tool(name="create_collection")
-    def create_collection(
+    async def create_collection(
         name: str,
         parent_name: str | None = None,
         link_to_scene: bool = True,
@@ -90,17 +90,17 @@ def create_server(client: BlenderBridgeClient) -> Any:
         params: dict[str, Any] = {"name": name, "link_to_scene": link_to_scene}
         if parent_name is not None:
             params["parent_name"] = parent_name
-        return client.call("create_collection", params)
+        return await client.acall("create_collection", params)
 
     @server.tool(name="add_object_to_collection")
-    def add_object_to_collection(
+    async def add_object_to_collection(
         object_name: str,
         collection_name: str,
         unlink_from_others: bool = False,
     ) -> dict[str, Any]:
         """Link an object into a collection."""
 
-        return client.call(
+        return await client.acall(
             "add_object_to_collection",
             {
                 "object_name": object_name,
@@ -110,31 +110,31 @@ def create_server(client: BlenderBridgeClient) -> Any:
         )
 
     @server.tool(name="remove_object_from_collection")
-    def remove_object_from_collection(
+    async def remove_object_from_collection(
         object_name: str,
         collection_name: str,
     ) -> dict[str, Any]:
         """Unlink an object from a collection."""
 
-        return client.call(
+        return await client.acall(
             "remove_object_from_collection",
             {"object_name": object_name, "collection_name": collection_name},
         )
 
     @server.tool(name="list_view_layers")
-    def list_view_layers() -> dict[str, Any]:
+    async def list_view_layers() -> dict[str, Any]:
         """List scene view layers."""
 
-        return client.call("list_view_layers")
+        return await client.acall("list_view_layers")
 
     @server.tool(name="set_active_view_layer")
-    def set_active_view_layer(name: str) -> dict[str, Any]:
+    async def set_active_view_layer(name: str) -> dict[str, Any]:
         """Set the active view layer in the current window."""
 
-        return client.call("set_active_view_layer", {"name": name})
+        return await client.acall("set_active_view_layer", {"name": name})
 
     @server.tool(name="set_collection_visibility")
-    def set_collection_visibility(
+    async def set_collection_visibility(
         collection_name: str,
         hide_viewport: bool | None = None,
         hide_render: bool | None = None,
@@ -158,22 +158,22 @@ def create_server(client: BlenderBridgeClient) -> Any:
             params["indirect_only"] = indirect_only
         if view_layer_name is not None:
             params["view_layer_name"] = view_layer_name
-        return client.call("set_collection_visibility", params)
+        return await client.acall("set_collection_visibility", params)
 
     @server.tool(name="list_objects")
-    def list_objects() -> dict[str, Any]:
+    async def list_objects() -> dict[str, Any]:
         """List objects in the active scene."""
 
-        return client.call("list_objects")
+        return await client.acall("list_objects")
 
     @server.tool(name="get_object_info")
-    def get_object_info(name: str) -> dict[str, Any]:
+    async def get_object_info(name: str) -> dict[str, Any]:
         """Get details for a specific object by name."""
 
-        return client.call("get_object_info", {"name": name})
+        return await client.acall("get_object_info", {"name": name})
 
     @server.tool(name="create_primitive")
-    def create_primitive(
+    async def create_primitive(
         primitive: str = "CUBE",
         name: str | None = None,
         size: float = 2.0,
@@ -192,16 +192,16 @@ def create_server(client: BlenderBridgeClient) -> Any:
         }
         if name is not None:
             params["name"] = name
-        return client.call("create_primitive", params)
+        return await client.acall("create_primitive", params)
 
     @server.tool(name="delete_object")
-    def delete_object(name: str) -> dict[str, Any]:
+    async def delete_object(name: str) -> dict[str, Any]:
         """Delete an object by name."""
 
-        return client.call("delete_object", {"name": name})
+        return await client.acall("delete_object", {"name": name})
 
     @server.tool(name="set_object_transform")
-    def set_object_transform(
+    async def set_object_transform(
         name: str,
         location: list[float] | None = None,
         rotation: list[float] | None = None,
@@ -217,10 +217,10 @@ def create_server(client: BlenderBridgeClient) -> Any:
         if scale is not None:
             params["scale"] = scale
 
-        return client.call("set_object_transform", params)
+        return await client.acall("set_object_transform", params)
 
     @server.tool(name="duplicate_object")
-    def duplicate_object(
+    async def duplicate_object(
         name: str,
         new_name: str | None = None,
         linked: bool = False,
@@ -230,10 +230,10 @@ def create_server(client: BlenderBridgeClient) -> Any:
         params: dict[str, Any] = {"name": name, "linked": linked}
         if new_name is not None:
             params["new_name"] = new_name
-        return client.call("duplicate_object", params)
+        return await client.acall("duplicate_object", params)
 
     @server.tool(name="keyframe_transform")
-    def keyframe_transform(
+    async def keyframe_transform(
         name: str,
         frame: int,
         location: list[float] | None = None,
@@ -249,10 +249,10 @@ def create_server(client: BlenderBridgeClient) -> Any:
             params["rotation"] = rotation
         if scale is not None:
             params["scale"] = scale
-        return client.call("keyframe_transform", params)
+        return await client.acall("keyframe_transform", params)
 
     @server.tool(name="insert_keyframe")
-    def insert_keyframe(
+    async def insert_keyframe(
         name: str,
         data_path: str,
         frame: int,
@@ -260,7 +260,7 @@ def create_server(client: BlenderBridgeClient) -> Any:
     ) -> dict[str, Any]:
         """Insert a keyframe for an arbitrary object data path."""
 
-        return client.call(
+        return await client.acall(
             "insert_keyframe",
             {
                 "name": name,
@@ -271,19 +271,19 @@ def create_server(client: BlenderBridgeClient) -> Any:
         )
 
     @server.tool(name="list_animation_data")
-    def list_animation_data(name: str) -> dict[str, Any]:
+    async def list_animation_data(name: str) -> dict[str, Any]:
         """List animation curves for an object."""
 
-        return client.call("list_animation_data", {"name": name})
+        return await client.acall("list_animation_data", {"name": name})
 
     @server.tool(name="list_actions")
-    def list_actions() -> dict[str, Any]:
+    async def list_actions() -> dict[str, Any]:
         """List actions in the .blend file."""
 
-        return client.call("list_actions")
+        return await client.acall("list_actions")
 
     @server.tool(name="create_action")
-    def create_action(
+    async def create_action(
         name: str,
         object_name: str | None = None,
         set_active: bool = True,
@@ -293,52 +293,52 @@ def create_server(client: BlenderBridgeClient) -> Any:
         params: dict[str, Any] = {"name": name, "set_active": set_active}
         if object_name is not None:
             params["object_name"] = object_name
-        return client.call("create_action", params)
+        return await client.acall("create_action", params)
 
     @server.tool(name="set_active_action")
-    def set_active_action(object_name: str, action_name: str) -> dict[str, Any]:
+    async def set_active_action(object_name: str, action_name: str) -> dict[str, Any]:
         """Set an object's active action."""
 
-        return client.call(
+        return await client.acall(
             "set_active_action",
             {"object_name": object_name, "action_name": action_name},
         )
 
     @server.tool(name="push_down_action")
-    def push_down_action(object_name: str) -> dict[str, Any]:
+    async def push_down_action(object_name: str) -> dict[str, Any]:
         """Push active action to NLA track and clear active action."""
 
-        return client.call("push_down_action", {"object_name": object_name})
+        return await client.acall("push_down_action", {"object_name": object_name})
 
     @server.tool(name="clear_animation_data")
-    def clear_animation_data(object_name: str) -> dict[str, Any]:
+    async def clear_animation_data(object_name: str) -> dict[str, Any]:
         """Clear all animation data from an object."""
 
-        return client.call("clear_animation_data", {"object_name": object_name})
+        return await client.acall("clear_animation_data", {"object_name": object_name})
 
     @server.tool(name="duplicate_action")
-    def duplicate_action(action_name: str, new_name: str | None = None) -> dict[str, Any]:
+    async def duplicate_action(action_name: str, new_name: str | None = None) -> dict[str, Any]:
         """Duplicate an action and optionally provide the new action name."""
 
         params: dict[str, Any] = {"action_name": action_name}
         if new_name is not None:
             params["new_name"] = new_name
-        return client.call("duplicate_action", params)
+        return await client.acall("duplicate_action", params)
 
     @server.tool(name="delete_action")
-    def delete_action(action_name: str, force: bool = False) -> dict[str, Any]:
+    async def delete_action(action_name: str, force: bool = False) -> dict[str, Any]:
         """Delete an action. Set force=true to remove even when it has users."""
 
-        return client.call("delete_action", {"action_name": action_name, "force": force})
+        return await client.acall("delete_action", {"action_name": action_name, "force": force})
 
     @server.tool(name="list_nla_tracks")
-    def list_nla_tracks(object_name: str) -> dict[str, Any]:
+    async def list_nla_tracks(object_name: str) -> dict[str, Any]:
         """List NLA tracks and strips for an object."""
 
-        return client.call("list_nla_tracks", {"object_name": object_name})
+        return await client.acall("list_nla_tracks", {"object_name": object_name})
 
     @server.tool(name="create_nla_strip")
-    def create_nla_strip(
+    async def create_nla_strip(
         object_name: str,
         action_name: str,
         track_name: str | None = None,
@@ -354,10 +354,10 @@ def create_server(client: BlenderBridgeClient) -> Any:
             params["strip_name"] = strip_name
         if frame_start is not None:
             params["frame_start"] = frame_start
-        return client.call("create_nla_strip", params)
+        return await client.acall("create_nla_strip", params)
 
     @server.tool(name="set_nla_strip")
-    def set_nla_strip(
+    async def set_nla_strip(
         object_name: str,
         track_name: str,
         strip_name: str,
@@ -390,13 +390,15 @@ def create_server(client: BlenderBridgeClient) -> Any:
             params["repeat"] = repeat
         if mute is not None:
             params["mute"] = mute
-        return client.call("set_nla_strip", params)
+        return await client.acall("set_nla_strip", params)
 
     @server.tool(name="remove_nla_strip")
-    def remove_nla_strip(object_name: str, track_name: str, strip_name: str) -> dict[str, Any]:
+    async def remove_nla_strip(
+        object_name: str, track_name: str, strip_name: str,
+    ) -> dict[str, Any]:
         """Remove an NLA strip from a track."""
 
-        return client.call(
+        return await client.acall(
             "remove_nla_strip",
             {
                 "object_name": object_name,
@@ -406,31 +408,31 @@ def create_server(client: BlenderBridgeClient) -> Any:
         )
 
     @server.tool(name="create_geometry_nodes_modifier")
-    def create_geometry_nodes_modifier(
+    async def create_geometry_nodes_modifier(
         object_name: str,
         modifier_name: str = "GeometryNodes",
     ) -> dict[str, Any]:
         """Create or return a geometry nodes modifier and node tree."""
 
-        return client.call(
+        return await client.acall(
             "create_geometry_nodes_modifier",
             {"object_name": object_name, "modifier_name": modifier_name},
         )
 
     @server.tool(name="list_geometry_nodes")
-    def list_geometry_nodes(
+    async def list_geometry_nodes(
         object_name: str,
         modifier_name: str = "GeometryNodes",
     ) -> dict[str, Any]:
         """List geometry nodes and links for a modifier."""
 
-        return client.call(
+        return await client.acall(
             "list_geometry_nodes",
             {"object_name": object_name, "modifier_name": modifier_name},
         )
 
     @server.tool(name="add_geometry_node")
-    def add_geometry_node(
+    async def add_geometry_node(
         object_name: str,
         node_type: str,
         modifier_name: str = "GeometryNodes",
@@ -445,10 +447,10 @@ def create_server(client: BlenderBridgeClient) -> Any:
         }
         if node_name is not None:
             params["node_name"] = node_name
-        return client.call("add_geometry_node", params)
+        return await client.acall("add_geometry_node", params)
 
     @server.tool(name="link_geometry_nodes")
-    def link_geometry_nodes(
+    async def link_geometry_nodes(
         object_name: str,
         from_node: str,
         from_socket: str,
@@ -458,7 +460,7 @@ def create_server(client: BlenderBridgeClient) -> Any:
     ) -> dict[str, Any]:
         """Create a link between geometry nodes sockets."""
 
-        return client.call(
+        return await client.acall(
             "link_geometry_nodes",
             {
                 "object_name": object_name,
@@ -471,7 +473,7 @@ def create_server(client: BlenderBridgeClient) -> Any:
         )
 
     @server.tool(name="add_geometry_input")
-    def add_geometry_input(
+    async def add_geometry_input(
         object_name: str,
         input_name: str,
         socket_type: str = "NodeSocketFloat",
@@ -480,7 +482,7 @@ def create_server(client: BlenderBridgeClient) -> Any:
     ) -> dict[str, Any]:
         """Add an input socket to a geometry-node group interface."""
 
-        return client.call(
+        return await client.acall(
             "add_geometry_input",
             {
                 "object_name": object_name,
@@ -492,19 +494,19 @@ def create_server(client: BlenderBridgeClient) -> Any:
         )
 
     @server.tool(name="list_geometry_inputs")
-    def list_geometry_inputs(
+    async def list_geometry_inputs(
         object_name: str,
         modifier_name: str = "GeometryNodes",
     ) -> dict[str, Any]:
         """List editable geometry-node group inputs for a modifier."""
 
-        return client.call(
+        return await client.acall(
             "list_geometry_inputs",
             {"object_name": object_name, "modifier_name": modifier_name},
         )
 
     @server.tool(name="set_geometry_input")
-    def set_geometry_input(
+    async def set_geometry_input(
         object_name: str,
         input_name_or_identifier: str,
         value: Any | None = None,
@@ -524,10 +526,10 @@ def create_server(client: BlenderBridgeClient) -> Any:
             params["use_attribute"] = use_attribute
         if attribute_name is not None:
             params["attribute_name"] = attribute_name
-        return client.call("set_geometry_input", params)
+        return await client.acall("set_geometry_input", params)
 
     @server.tool(name="add_modifier")
-    def add_modifier(
+    async def add_modifier(
         object_name: str,
         modifier_type: str,
         name: str | None = None,
@@ -543,34 +545,34 @@ def create_server(client: BlenderBridgeClient) -> Any:
             params["name"] = name
         if settings is not None:
             params["settings"] = settings
-        return client.call("add_modifier", params)
+        return await client.acall("add_modifier", params)
 
     @server.tool(name="list_modifiers")
-    def list_modifiers(object_name: str) -> dict[str, Any]:
+    async def list_modifiers(object_name: str) -> dict[str, Any]:
         """List modifiers on an object."""
 
-        return client.call("list_modifiers", {"object_name": object_name})
+        return await client.acall("list_modifiers", {"object_name": object_name})
 
     @server.tool(name="apply_modifier")
-    def apply_modifier(object_name: str, modifier_name: str) -> dict[str, Any]:
+    async def apply_modifier(object_name: str, modifier_name: str) -> dict[str, Any]:
         """Apply a modifier on an object."""
 
-        return client.call(
+        return await client.acall(
             "apply_modifier",
             {"object_name": object_name, "modifier_name": modifier_name},
         )
 
     @server.tool(name="remove_modifier")
-    def remove_modifier(object_name: str, modifier_name: str) -> dict[str, Any]:
+    async def remove_modifier(object_name: str, modifier_name: str) -> dict[str, Any]:
         """Remove a modifier from an object."""
 
-        return client.call(
+        return await client.acall(
             "remove_modifier",
             {"object_name": object_name, "modifier_name": modifier_name},
         )
 
     @server.tool(name="add_constraint")
-    def add_constraint(
+    async def add_constraint(
         object_name: str,
         constraint_type: str,
         name: str | None = None,
@@ -586,25 +588,25 @@ def create_server(client: BlenderBridgeClient) -> Any:
             params["name"] = name
         if target_name is not None:
             params["target_name"] = target_name
-        return client.call("add_constraint", params)
+        return await client.acall("add_constraint", params)
 
     @server.tool(name="list_constraints")
-    def list_constraints(object_name: str) -> dict[str, Any]:
+    async def list_constraints(object_name: str) -> dict[str, Any]:
         """List constraints on an object."""
 
-        return client.call("list_constraints", {"object_name": object_name})
+        return await client.acall("list_constraints", {"object_name": object_name})
 
     @server.tool(name="remove_constraint")
-    def remove_constraint(object_name: str, constraint_name: str) -> dict[str, Any]:
+    async def remove_constraint(object_name: str, constraint_name: str) -> dict[str, Any]:
         """Remove a constraint from an object."""
 
-        return client.call(
+        return await client.acall(
             "remove_constraint",
             {"object_name": object_name, "constraint_name": constraint_name},
         )
 
     @server.tool(name="create_material")
-    def create_material(
+    async def create_material(
         name: str,
         base_color: list[float] | None = None,
         roughness: float = 0.5,
@@ -612,7 +614,7 @@ def create_server(client: BlenderBridgeClient) -> Any:
     ) -> dict[str, Any]:
         """Create or update a material with principled parameters."""
 
-        return client.call(
+        return await client.acall(
             "create_material",
             {
                 "name": name,
@@ -623,7 +625,7 @@ def create_server(client: BlenderBridgeClient) -> Any:
         )
 
     @server.tool(name="assign_material")
-    def assign_material(
+    async def assign_material(
         object_name: str,
         material_name: str,
         slot_index: int | None = None,
@@ -636,10 +638,10 @@ def create_server(client: BlenderBridgeClient) -> Any:
         }
         if slot_index is not None:
             params["slot_index"] = slot_index
-        return client.call("assign_material", params)
+        return await client.acall("assign_material", params)
 
     @server.tool(name="create_camera")
-    def create_camera(
+    async def create_camera(
         name: str = "Camera",
         location: list[float] | None = None,
         rotation: list[float] | None = None,
@@ -647,7 +649,7 @@ def create_server(client: BlenderBridgeClient) -> Any:
     ) -> dict[str, Any]:
         """Create a camera object and optionally set it active."""
 
-        return client.call(
+        return await client.acall(
             "create_camera",
             {
                 "name": name,
@@ -658,13 +660,13 @@ def create_server(client: BlenderBridgeClient) -> Any:
         )
 
     @server.tool(name="set_active_camera")
-    def set_active_camera(name: str) -> dict[str, Any]:
+    async def set_active_camera(name: str) -> dict[str, Any]:
         """Set the active scene camera by object name."""
 
-        return client.call("set_active_camera", {"name": name})
+        return await client.acall("set_active_camera", {"name": name})
 
     @server.tool(name="create_light")
-    def create_light(
+    async def create_light(
         name: str = "Light",
         light_type: str = "POINT",
         energy: float = 1000.0,
@@ -673,7 +675,7 @@ def create_server(client: BlenderBridgeClient) -> Any:
     ) -> dict[str, Any]:
         """Create a light object."""
 
-        return client.call(
+        return await client.acall(
             "create_light",
             {
                 "name": name,
@@ -685,31 +687,33 @@ def create_server(client: BlenderBridgeClient) -> Any:
         )
 
     @server.tool(name="enable_compositor")
-    def enable_compositor(use_nodes: bool = True, clear_nodes: bool = False) -> dict[str, Any]:
+    async def enable_compositor(
+        use_nodes: bool = True, clear_nodes: bool = False,
+    ) -> dict[str, Any]:
         """Enable compositor nodes and optionally reset node tree."""
 
-        return client.call(
+        return await client.acall(
             "enable_compositor",
             {"use_nodes": use_nodes, "clear_nodes": clear_nodes},
         )
 
     @server.tool(name="list_compositor_nodes")
-    def list_compositor_nodes() -> dict[str, Any]:
+    async def list_compositor_nodes() -> dict[str, Any]:
         """List compositor nodes and links."""
 
-        return client.call("list_compositor_nodes")
+        return await client.acall("list_compositor_nodes")
 
     @server.tool(name="add_compositor_node")
-    def add_compositor_node(node_type: str, node_name: str | None = None) -> dict[str, Any]:
+    async def add_compositor_node(node_type: str, node_name: str | None = None) -> dict[str, Any]:
         """Add a compositor node by Blender node type id."""
 
         params: dict[str, Any] = {"node_type": node_type}
         if node_name is not None:
             params["node_name"] = node_name
-        return client.call("add_compositor_node", params)
+        return await client.acall("add_compositor_node", params)
 
     @server.tool(name="link_compositor_nodes")
-    def link_compositor_nodes(
+    async def link_compositor_nodes(
         from_node: str,
         from_socket: str,
         to_node: str,
@@ -717,7 +721,7 @@ def create_server(client: BlenderBridgeClient) -> Any:
     ) -> dict[str, Any]:
         """Link sockets between two compositor nodes."""
 
-        return client.call(
+        return await client.acall(
             "link_compositor_nodes",
             {
                 "from_node": from_node,
@@ -728,7 +732,7 @@ def create_server(client: BlenderBridgeClient) -> Any:
         )
 
     @server.tool(name="set_view_layer_passes")
-    def set_view_layer_passes(
+    async def set_view_layer_passes(
         view_layer_name: str | None = None,
         use_pass_z: bool | None = None,
         use_pass_normal: bool | None = None,
@@ -757,10 +761,10 @@ def create_server(client: BlenderBridgeClient) -> Any:
             params["use_pass_emit"] = use_pass_emit
         if use_pass_ambient_occlusion is not None:
             params["use_pass_ambient_occlusion"] = use_pass_ambient_occlusion
-        return client.call("set_view_layer_passes", params)
+        return await client.acall("set_view_layer_passes", params)
 
     @server.tool(name="set_viewport_view")
-    def set_viewport_view(
+    async def set_viewport_view(
         view: str | None = None,
         location: list[float] | None = None,
         rotation_quaternion: list[float] | None = None,
@@ -783,10 +787,10 @@ def create_server(client: BlenderBridgeClient) -> Any:
             params["lens"] = lens
         if shading_type is not None:
             params["shading_type"] = shading_type
-        return client.call("set_viewport_view", params)
+        return await client.acall("set_viewport_view", params)
 
     @server.tool(name="capture_viewport_screenshot")
-    def capture_viewport_screenshot(
+    async def capture_viewport_screenshot(
         filepath: str,
         view: str | None = None,
         location: list[float] | None = None,
@@ -826,10 +830,10 @@ def create_server(client: BlenderBridgeClient) -> Any:
             params["engine"] = engine
         if samples is not None:
             params["samples"] = samples
-        return client.call("capture_viewport_screenshot", params)
+        return await client.acall("capture_viewport_screenshot", params)
 
     @server.tool(name="workflow_setup_studio")
-    def workflow_setup_studio(
+    async def workflow_setup_studio(
         object_name: str = "Subject",
         primitive: str = "CUBE",
         size: float = 2.0,
@@ -843,7 +847,7 @@ def create_server(client: BlenderBridgeClient) -> Any:
     ) -> dict[str, Any]:
         """Set up a studio-style scene with subject, camera, and three-point lighting."""
 
-        return client.call(
+        return await client.acall(
             "workflow_setup_studio",
             {
                 "object_name": object_name,
@@ -860,7 +864,7 @@ def create_server(client: BlenderBridgeClient) -> Any:
         )
 
     @server.tool(name="workflow_create_turntable")
-    def workflow_create_turntable(
+    async def workflow_create_turntable(
         object_name: str,
         frame_start: int = 1,
         frame_end: int = 120,
@@ -869,7 +873,7 @@ def create_server(client: BlenderBridgeClient) -> Any:
     ) -> dict[str, Any]:
         """Create turntable keyframes on an object."""
 
-        return client.call(
+        return await client.acall(
             "workflow_create_turntable",
             {
                 "object_name": object_name,
@@ -881,7 +885,7 @@ def create_server(client: BlenderBridgeClient) -> Any:
         )
 
     @server.tool(name="workflow_turntable_render")
-    def workflow_turntable_render(
+    async def workflow_turntable_render(
         output_path: str,
         object_name: str = "Subject",
         frame_start: int = 1,
@@ -917,10 +921,10 @@ def create_server(client: BlenderBridgeClient) -> Any:
             params["engine"] = engine
         if samples is not None:
             params["samples"] = samples
-        return client.call("workflow_turntable_render", params)
+        return await client.acall("workflow_turntable_render", params)
 
     @server.tool(name="render_still")
-    def render_still(
+    async def render_still(
         filepath: str,
         engine: str | None = None,
         resolution_x: int | None = None,
@@ -939,10 +943,10 @@ def create_server(client: BlenderBridgeClient) -> Any:
         if samples is not None:
             params["samples"] = samples
 
-        return client.call("render_still", params)
+        return await client.acall("render_still", params)
 
     @server.tool(name="render_animation")
-    def render_animation(
+    async def render_animation(
         filepath: str,
         engine: str | None = None,
         frame_start: int | None = None,
@@ -957,20 +961,20 @@ def create_server(client: BlenderBridgeClient) -> Any:
             params["frame_start"] = frame_start
         if frame_end is not None:
             params["frame_end"] = frame_end
-        return client.call("render_animation", params)
+        return await client.acall("render_animation", params)
 
     @server.tool(name="import_file")
-    def import_file(filepath: str, file_type: str | None = None) -> dict[str, Any]:
+    async def import_file(filepath: str, file_type: str | None = None) -> dict[str, Any]:
         """Import a supported 3D file."""
 
         params: dict[str, Any] = {"filepath": filepath}
         if file_type is not None:
             params["file_type"] = file_type
 
-        return client.call("import_file", params)
+        return await client.acall("import_file", params)
 
     @server.tool(name="export_file")
-    def export_file(
+    async def export_file(
         filepath: str,
         file_type: str | None = None,
         use_selection: bool = False,
@@ -981,13 +985,13 @@ def create_server(client: BlenderBridgeClient) -> Any:
         if file_type is not None:
             params["file_type"] = file_type
 
-        return client.call("export_file", params)
+        return await client.acall("export_file", params)
 
     @server.tool(name="execute_blender_code")
-    def execute_blender_code(code: str) -> dict[str, Any]:
+    async def execute_blender_code(code: str) -> dict[str, Any]:
         """Execute Python code in Blender when unsafe mode is enabled."""
 
-        return client.call("execute_code", {"code": code})
+        return await client.acall("execute_code", {"code": code})
 
     return server
 
