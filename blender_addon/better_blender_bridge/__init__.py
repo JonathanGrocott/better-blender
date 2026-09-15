@@ -675,8 +675,9 @@ def _dispatch_command(method: str, params: dict[str, Any]) -> dict[str, Any]:
 
     if method == "delete_object":
         obj = _require_object(params.get("name"))
+        deleted_name = obj.name
         bpy.data.objects.remove(obj, do_unlink=True)
-        return {"deleted": obj.name}
+        return {"deleted": deleted_name}
 
     if method == "set_object_transform":
         obj = _require_object(params.get("name"))

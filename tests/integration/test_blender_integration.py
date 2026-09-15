@@ -297,3 +297,9 @@ def test_capture_viewport_screenshot_headless_fallback(
     assert result["captured"] is True
     assert result["capture_mode"] in {"viewport_opengl", "render_fallback_no_viewport"}
     assert capture_path.exists()
+
+
+def test_delete_object_returns_success(bridge_client: BlenderBridgeClient) -> None:
+    bridge_client.call("create_primitive", {"name": "DeleteMe"})
+    assert bridge_client.call("delete_object", {"name": "DeleteMe"}) == {"deleted": "DeleteMe"}
+    assert "DeleteMe" not in {obj["name"] for obj in bridge_client.call("list_objects")["objects"]}
