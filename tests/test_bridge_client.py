@@ -98,3 +98,16 @@ def test_buffered_reader_handles_fragmented_utf8():
         sender.start()
         assert BlenderBridgeClient._read_line(left) == '{"value":"é"}'
         sender.join()
+
+
+def test_transport_failure_exposes_request_id(monkeypatch):
+    import socket
+
+    def fail_connection(*args, **kwargs):
+        raise OSError("connection lost")
+
+    monkeypatch.setattr(socket, "create_connection", fail_connection)
+    with pytest.raises(BridgeError) as error:
+        BlenderBridgeClient(BridgeConfig()).call("create_collection", {"name": "Example"})
+    assert error.value.request_id
+    assert error.value.request_id in str(error.value)

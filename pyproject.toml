@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "better-blender-mcp"
-version = "0.4.0"
+version = "0.5.0"
 description = "MCP server and Blender bridge add-on for local Blender automation"
 readme = "README.md"
 requires-python = ">=3.11"

@@ -1,4 +1,4 @@
-# Better Blender Bridge Specification (Draft v0.1)
+# Better Blender Bridge Specification (protocol 1, package 0.5)
 
 ## Scope
 Defines the local protocol between:
@@ -8,7 +8,7 @@ Defines the local protocol between:
 ## Transport
 - Local TCP listener bound to `127.0.0.1` by default.
 - Newline-delimited JSON request/response envelopes.
-- One request per connection for v0.1.
+- One request per connection.
 
 ## Authentication
 - Shared bearer token passed in each request body as `token`.
@@ -46,7 +46,8 @@ Failure:
 ```
 
 ## Command Execution Model
-- Request handlers only parse/validate and enqueue commands.
+- Request handlers authenticate and enqueue Blender commands; job/status/diagnostic
+  reads use thread-safe managers directly.
 - Blender API work executes on main thread via timer callback (`bpy.app.timers`).
 - Default bridge timeout is 30 seconds per request.
 - Requests may include positive `timeout_seconds`; the smaller of this budget and the
@@ -54,8 +55,8 @@ Failure:
   an additional second for the timeout response to arrive.
 - Queued commands that expire are skipped without changing Blender state (`code: EXPIRED`).
 - Commands already executing cannot be rolled back by a socket timeout. Their response
-  uses `code: OUTCOME_UNKNOWN` and warns against automatic retries. Inspect scene/output
-  state before deciding whether to retry. Rendering still executes synchronously in Blender.
+  uses `code: OUTCOME_UNKNOWN`. Query `get_request_status`; retry only with the same
+  stable ID through `execute_request`. MCP rendering submits isolated worker jobs.
 - MCP socket waits run off the event loop; Blender API work remains on its main thread.
 
 ## Implemented Methods (v0.2)
@@ -192,5 +193,29 @@ Jobs interrupted by an unclean restart are marked interrupted; they are not resu
 
 State is stored under ~/.better-blender, or BETTER_BLENDER_STATE_DIR when configured
 in the Blender process environment. Job history is namespaced by bridge endpoint.
-Checkpoint files remain until removed by the user. Completed job history is bounded
+Checkpoint snapshots use count/byte retention limits (see below). Completed job history is bounded
 to 32 records; render output files remain caller-owned and are never pruned.
+
+
+## Targeting, retries and operations (0.5)
+
+Requests may include `expected_document_id` (string). Successful response envelopes
+also carry `document_id` and `session_id`. `get_document_context` returns these plus
+the active scene and filepath. Mutations are rejected with `DOCUMENT_CHANGED` if
+the active document differs at execution. Omitted IDs capture enqueue-time context.
+
+Mutations are journaled using their envelope ID. Repeated IDs with identical method
+and parameters replay the retained result or return `OUTCOME_UNKNOWN` while pending
+or interrupted. Different arguments are rejected. `execute_request` carries a stable
+ID as a parameter while preserving the outer MCP transport ID. Reads do not need
+idempotency IDs. `get_request_status` returns `not_found`, `queued`, `running`,
+`completed`, `expired`, or `interrupted`, with a retained response where available.
+`completed` means dispatch finished; inspect its response's `ok` for success.
+
+Additional tools: `get_diagnostics`, `delete_checkpoint`, `get_checkpoint_usage`,
+`configure_checkpoint_retention`, and `check_assets`. Checkpoint defaults are 20
+snapshots / 2 GiB; restored working copies are never pruned. `restore_checkpoint`
+accepts `allow_missing_assets` for deliberate recovery with missing/unverified assets.
+
+Authentication setup, access controls, journal bounds, logs, failure semantics and
+asset-check limitations are specified in [Operations](operations.md).

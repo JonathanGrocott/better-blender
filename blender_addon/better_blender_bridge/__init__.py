@@ -14,6 +14,7 @@ import math
 import queue
 import shutil
 import socketserver
+import sqlite3
 import sys
 import tempfile
 import threading
@@ -47,7 +48,7 @@ from .validation import SCHEMAS, validate_command
 bl_info = {
     "name": "Better Blender Bridge",
     "author": "Better Blender Contributors",
-    "version": (0, 4, 0),
+    "version": (0, 5, 0),
     "blender": (3, 4, 1),
     "location": "View3D > Sidebar > Better Blender",
     "description": "Local bridge for Better Blender MCP",
@@ -162,7 +163,7 @@ class _BridgeRequestHandler(socketserver.StreamRequestHandler):
             payload = json.loads(data.split(b"\n", 1)[0].decode("utf-8"))
             if not isinstance(payload, dict):
                 raise ValueError("Request must be an object")
-        except (ValueError, OSError) as exc:
+        except (ValueError, OSError, sqlite3.Error) as exc:
             self._write(
                 {"id": "unknown", "ok": False, "error": str(exc), "code": "INVALID_REQUEST"}
             )
@@ -252,7 +253,7 @@ class _BridgeRequestHandler(socketserver.StreamRequestHandler):
                     )
                     result = operation(params["job_id"])
                 self._write({"id": request_id, "ok": True, "result": result})
-            except (ValueError, OSError) as exc:
+            except (ValueError, OSError, sqlite3.Error) as exc:
                 self._write({"id": request_id, "ok": False, "error": str(exc)})
             return
 
@@ -299,7 +300,7 @@ class _BridgeRequestHandler(socketserver.StreamRequestHandler):
                         }
                         self._write(response)
                         return
-                except (ValueError, OSError) as exc:
+                except (ValueError, OSError, sqlite3.Error) as exc:
                     self._write(
                         {
                             "id": request_id,
@@ -1002,6 +1003,11 @@ def _dispatch_command(method: str, params: dict[str, Any]) -> dict[str, Any]:
                 "checkpoints": True,
                 "node_inspection": True,
                 "persistent_jobs": True,
+                "document_guards": True,
+                "durable_requests": True,
+                "access_controls": True,
+                "checkpoint_retention": True,
+                "diagnostics": True,
             },
             "bridge_version": ".".join(str(v) for v in bl_info["version"]),
             "blender_version": bpy.app.version_string,
@@ -1063,7 +1069,15 @@ def _finish_command(runtime, command, response, state="completed"):
             "code": "INVALID_RESULT",
         }
     if command.tracked:
-        runtime.ledger.update(command.request_id, state, response)
+        try:
+            runtime.ledger.update(command.request_id, state, response)
+        except (OSError, sqlite3.Error):
+            response = {
+                "id": command.request_id,
+                "ok": False,
+                "code": "JOURNAL_ERROR",
+                "error": "Cannot persist outcome; inspect the document before a new request.",
+            }
     command.state = state
     if command.result_queue.empty():
         command.result_queue.put_nowait(response)
@@ -1109,7 +1123,21 @@ def _drain_command_queue() -> float | None:
                 )
                 continue
             if command.tracked:
-                runtime.ledger.update(command.request_id, "running")
+                try:
+                    runtime.ledger.update(command.request_id, "running")
+                except (OSError, sqlite3.Error):
+                    _finish_command(
+                        runtime,
+                        command,
+                        {
+                            "id": command.request_id,
+                            "ok": False,
+                            "code": "JOURNAL_ERROR",
+                            "error": "Journal unavailable; operation was not started.",
+                        },
+                        "expired",
+                    )
+                    continue
             command.state = "running"
         started = time.monotonic()
         try:

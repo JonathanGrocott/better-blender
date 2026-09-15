@@ -68,8 +68,6 @@ class BlenderBridgeClient:
                 response_line = self._read_line(conn, deadline)
             payload = json.loads(response_line)
             response = BridgeResponse.from_json(payload)
-            if response.ok and isinstance(payload.get("document_id"), str):
-                self.document_id = payload["document_id"]
         except BridgeError as exc:
             exc.request_id = request.request_id
             exc.args = (f"{exc} (request ID: {request.request_id})",)
@@ -84,14 +82,17 @@ class BlenderBridgeClient:
             code = "OUTCOME_UNKNOWN" if sent else "CONNECTION_ERROR"
             detail = " Operation outcome unknown; do not retry automatically." if sent else ""
             raise BridgeError(
-                f"Bridge connection failed: {exc}.{detail} Request ID: {request.request_id}", code
+                f"Bridge connection failed: {exc}.{detail} Request ID: {request.request_id}",
+                code,
+                request.request_id,
             ) from exc
 
         if response.code == "BUSY" and response.request_id == "unknown":
-            raise BridgeError(response.error or "Bridge busy", "BUSY")
+            raise BridgeError(response.error or "Bridge busy", "BUSY", request.request_id)
         if response.request_id != request.request_id:
             raise BridgeError(
-                f"Mismatched response id: expected {request.request_id}, got {response.request_id}"
+                f"Mismatched response id: expected {request.request_id}, got {response.request_id}",
+                request_id=request.request_id,
             )
 
         if not response.ok:
@@ -101,6 +102,8 @@ class BlenderBridgeClient:
                 request.request_id,
             )
 
+        if isinstance(payload.get("document_id"), str):
+            self.document_id = payload["document_id"]
         return response.result or {}
 
     @staticmethod

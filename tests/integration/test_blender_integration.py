@@ -977,6 +977,16 @@ try:
     assert replay['ok'], replay
     assert bpy.data.collections.get('OnlyOnce') is not None
     assert bpy.data.collections.get('OnlyOnce.001') is None
+    journal_failure = send('disk-error', 'create_collection', {'name': 'MustNotRun'})
+    wait_depth(1)
+    update = runtime.ledger.update
+    def fail_update(*args, **kwargs):
+        raise OSError('simulated disk failure')
+    runtime.ledger.update = fail_update
+    assert bridge._drain_command_queue() is not None
+    assert receive(journal_failure)['code'] == 'JOURNAL_ERROR'
+    assert bpy.data.collections.get('MustNotRun') is None
+    runtime.ledger.update = update
     switch = send('switch', 'new_scene', {'use_empty': True})
     wait_depth(1)
     stale = send('queued-old-document', 'create_collection', {'name': 'WrongDocument'})

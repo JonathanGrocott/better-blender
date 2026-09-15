@@ -116,6 +116,11 @@ def _run_doctor() -> int:
             "checkpoints",
             "node_inspection",
             "persistent_jobs",
+            "document_guards",
+            "durable_requests",
+            "access_controls",
+            "checkpoint_retention",
+            "diagnostics",
         }
         missing = sorted(key for key in required if capabilities.get(key) is not True)
         healthy = status.get("protocol_version") == 1 and version >= (3, 4, 1) and not missing

@@ -45,6 +45,11 @@ def test_doctor_checks_bridge_compatibility(monkeypatch, capsys):
                 "checkpoints": True,
                 "node_inspection": True,
                 "persistent_jobs": True,
+                "document_guards": True,
+                "durable_requests": True,
+                "access_controls": True,
+                "checkpoint_retention": True,
+                "diagnostics": True,
             },
         },
     )
@@ -92,7 +97,12 @@ def test_doctor_detects_stale_addon(monkeypatch, capsys):
     assert cli._run_doctor() == 1
     report = json.loads(capsys.readouterr().out)
     assert report["bridge"]["missing_capabilities"] == [
+        "access_controls",
+        "checkpoint_retention",
         "checkpoints",
+        "diagnostics",
+        "document_guards",
+        "durable_requests",
         "inline_images",
         "node_inspection",
         "persistent_jobs",
