@@ -26,3 +26,43 @@ def test_install_addon_accepts_patch_version(tmp_path: Path) -> None:
     assert result == 0
     assert (destination / "better_blender_bridge" / "__init__.py").exists()
 
+
+def test_doctor_checks_bridge_compatibility(monkeypatch, capsys):
+    import json
+
+    monkeypatch.setattr(cli, "_find_blender_executable", lambda: Path("/test/blender"))
+    monkeypatch.setattr(
+        cli.BlenderBridgeClient,
+        "call",
+        lambda *a: {
+            "protocol_version": 1,
+            "blender_version": "5.0.1",
+            "bridge_running": True,
+        },
+    )
+    assert cli._run_doctor() == 0
+    assert json.loads(capsys.readouterr().out)["bridge"]["compatible"] is True
+    monkeypatch.setattr(
+        cli.BlenderBridgeClient,
+        "call",
+        lambda *a: {
+            "protocol_version": 99,
+            "blender_version": "5.0.1",
+        },
+    )
+    assert cli._run_doctor() == 1
+
+
+def test_doctor_reports_connection_failure(monkeypatch, capsys):
+    import json
+
+    monkeypatch.setattr(cli, "_find_blender_executable", lambda: Path("/test/blender"))
+
+    def offline(*args):
+        raise ConnectionRefusedError("Bridge unavailable")
+
+    monkeypatch.setattr(cli.BlenderBridgeClient, "call", offline)
+    assert cli._run_doctor() == 1
+    report = json.loads(capsys.readouterr().out)
+    assert report["bridge"]["connected"] is False
+    assert "Bridge unavailable" in report["bridge"]["error"]

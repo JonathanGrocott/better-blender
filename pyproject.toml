@@ -28,10 +28,11 @@ dev = [
 better-blender-mcp = "better_blender_mcp.cli:main"
 
 [tool.setuptools]
-package-dir = { "" = "src" }
+packages = ["better_blender_mcp", "better_blender_bridge"]
+package-dir = { "better_blender_mcp" = "src/better_blender_mcp", "better_blender_bridge" = "blender_addon/better_blender_bridge" }
 
-[tool.setuptools.packages.find]
-where = ["src"]
+[tool.setuptools.package-data]
+better_blender_bridge = ["schemas.json"]
 
 [tool.ruff]
 line-length = 100

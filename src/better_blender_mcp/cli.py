@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import platform
 import shutil
 import sys
 from collections.abc import Sequence
+from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
+from better_blender_mcp.bridge_client import BlenderBridgeClient
 from better_blender_mcp.config import load_config_from_env
 from better_blender_mcp.mcp_server import run_server
 
@@ -73,7 +77,7 @@ def _run_doctor() -> int:
     config = load_config_from_env()
     blender_path = _find_blender_executable()
 
-    report = {
+    report: dict[str, Any] = {
         "python": sys.version.split()[0],
         "platform": platform.platform(),
         "bridge": {
@@ -85,13 +89,31 @@ def _run_doctor() -> int:
         "blender_executable": str(blender_path) if blender_path else None,
     }
 
+    healthy = False
+    try:
+        status = BlenderBridgeClient(
+            replace(
+                config.bridge,
+                timeout_seconds=min(config.bridge.timeout_seconds, 3.0),
+            )
+        ).call("health")
+        version = tuple(
+            int(v) for v in str(status.get("blender_version", "0")).split()[0].split(".")
+        )
+        healthy = status.get("protocol_version") == 1 and version >= (3, 4, 1)
+        report["bridge"]["connected"] = True
+        report["bridge"]["compatible"] = healthy
+        report["bridge"]["runtime"] = status
+    except (OSError, ValueError, RuntimeError) as exc:
+        report["bridge"]["connected"] = False
+        report["bridge"]["error"] = str(exc)
     print(json.dumps(report, indent=2))
 
     if blender_path is None:
         print("doctor: Blender executable not found in PATH or common locations", file=sys.stderr)
         return 1
 
-    return 0
+    return 0 if healthy else 1
 
 
 def _find_blender_executable() -> Path | None:
@@ -140,10 +162,12 @@ def _print_config(target: str) -> None:
 
 
 def _install_addon(version: str, destination: str | None) -> int:
-    addon_source = Path(__file__).resolve().parents[2] / "blender_addon" / "better_blender_bridge"
-    if not addon_source.exists():
-        print(f"Add-on source not found: {addon_source}", file=sys.stderr)
+    # Looking up the package avoids importing bpy outside Blender.
+    spec = importlib.util.find_spec("better_blender_bridge")
+    if spec is None or spec.origin is None:
+        print("Packaged Blender add-on not found. Reinstall better-blender-mcp.", file=sys.stderr)
         return 1
+    addon_source = Path(spec.origin).parent
 
     try:
         scripts_version = _normalize_blender_scripts_version(version)

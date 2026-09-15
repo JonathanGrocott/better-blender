@@ -600,6 +600,8 @@ def _dispatch_command(method: str, params: dict[str, Any]) -> dict[str, Any]:
     if method == "health":
         return {
             "bridge_running": True,
+            "protocol_version": 1,
+            "bridge_version": ".".join(str(v) for v in bl_info["version"]),
             "blender_version": bpy.app.version_string,
             "file_path": bpy.data.filepath,
             "timestamp": time.time(),
