@@ -32,6 +32,26 @@ def test_bridge_response_invalid_payload():
 
 def test_bridge_request_includes_optional_execution_budget():
     req = BridgeRequest(
-        request_id="abc", method="health", params={}, token="secret", timeout_seconds=0.5,
+        request_id="abc",
+        method="health",
+        params={},
+        token="secret",
+        timeout_seconds=0.5,
     )
     assert req.to_json()["timeout_seconds"] == 0.5
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        [],
+        None,
+        {"id": "a", "ok": True},
+        {"id": "a", "ok": True, "result": []},
+        {"id": "a", "ok": False},
+        {"id": "a", "ok": False, "error": "bad", "code": 1},
+    ],
+)
+def test_rejects_malformed_response_envelopes(payload):
+    with pytest.raises(ValueError):
+        BridgeResponse.from_json(payload)

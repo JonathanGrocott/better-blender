@@ -88,9 +88,7 @@ def bridge_client(tmp_path: Path):
             if process.poll() is not None:
                 stdout, stderr = process.communicate(timeout=1)
                 raise RuntimeError(
-                    "Blender bridge runner exited early.\n"
-                    f"stdout:\n{stdout}\n"
-                    f"stderr:\n{stderr}\n"
+                    f"Blender bridge runner exited early.\nstdout:\n{stdout}\nstderr:\n{stderr}\n"
                 )
             time.sleep(0.1)
         else:
@@ -309,17 +307,34 @@ def test_geometry_edits_preserve_existing_output(bridge_client: BlenderBridgeCli
     bridge_client.call("create_primitive", {"name": "GraphSubject"})
     params = {"object_name": "GraphSubject"}
     bridge_client.call("create_geometry_nodes_modifier", params)
-    bridge_client.call("add_geometry_node", {
-        **params, "node_type": "GeometryNodeTransform", "node_name": "Transform",
-    })
-    bridge_client.call("link_geometry_nodes", {
-        **params, "from_node": "Group Input", "from_socket": "Geometry",
-        "to_node": "Transform", "to_socket": "Geometry",
-    })
-    bridge_client.call("link_geometry_nodes", {
-        **params, "from_node": "Transform", "from_socket": "Geometry",
-        "to_node": "Group Output", "to_socket": "Geometry",
-    })
+    bridge_client.call(
+        "add_geometry_node",
+        {
+            **params,
+            "node_type": "GeometryNodeTransform",
+            "node_name": "Transform",
+        },
+    )
+    bridge_client.call(
+        "link_geometry_nodes",
+        {
+            **params,
+            "from_node": "Group Input",
+            "from_socket": "Geometry",
+            "to_node": "Transform",
+            "to_socket": "Geometry",
+        },
+    )
+    bridge_client.call(
+        "link_geometry_nodes",
+        {
+            **params,
+            "from_node": "Transform",
+            "from_socket": "Geometry",
+            "to_node": "Group Output",
+            "to_socket": "Geometry",
+        },
+    )
     before = bridge_client.call("list_geometry_nodes", params)["links"]
     bridge_client.call("add_geometry_node", {**params, "node_type": "ShaderNodeMath"})
     bridge_client.call("create_geometry_nodes_modifier", params)
@@ -332,7 +347,9 @@ def test_object_operations_reject_edit_mode() -> None:
     if blender is None:
         pytest.skip("Blender executable not available")
     addon_parent = Path(__file__).resolve().parents[2] / "blender_addon"
-    code = f"import sys; sys.path.insert(0, {str(addon_parent)!r})\n" + """
+    code = (
+        f"import sys; sys.path.insert(0, {str(addon_parent)!r})\n"
+        + """
 import bpy
 import better_blender_bridge as bridge
 obj = bpy.context.active_object
@@ -357,9 +374,20 @@ assert len(obj.modifiers) == 1
 bpy.ops.object.mode_set(mode='OBJECT')
 assert len(obj.data.vertices) == 8
 """
+    )
     result = subprocess.run(
-        [blender, "--background", "--factory-startup", "--python-exit-code", "1",
-         "--python-expr", code], capture_output=True, text=True, timeout=30,
+        [
+            blender,
+            "--background",
+            "--factory-startup",
+            "--python-exit-code",
+            "1",
+            "--python-expr",
+            code,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
     assert result.returncode == 0, result.stdout + result.stderr
 
@@ -369,7 +397,9 @@ def test_expired_commands_never_execute_and_running_timeout_is_explicit() -> Non
     if blender is None:
         pytest.skip("Blender executable not available")
     addon_parent = Path(__file__).resolve().parents[2] / "blender_addon"
-    code = f"import sys; sys.path.insert(0, {str(addon_parent)!r})\n" + r"""
+    code = (
+        f"import sys; sys.path.insert(0, {str(addon_parent)!r})\n"
+        + r"""
 import json
 import socket
 import threading
@@ -418,9 +448,20 @@ try:
 finally:
     bridge.stop_bridge()
 """
+    )
     result = subprocess.run(
-        [blender, "--background", "--factory-startup", "--python-exit-code", "1",
-         "--python-expr", code], capture_output=True, text=True, timeout=30,
+        [
+            blender,
+            "--background",
+            "--factory-startup",
+            "--python-exit-code",
+            "1",
+            "--python-expr",
+            code,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
     assert result.returncode == 0, result.stdout + result.stderr
 
@@ -438,12 +479,30 @@ def test_invalid_requests_leave_scene_unchanged(bridge_client: BlenderBridgeClie
             bridge_client.call("set_object_transform", params)
         assert bridge_client.call("get_object_info", {"name": "Validated"}) == before
     with pytest.raises(BridgeError):
-        bridge_client.call("add_modifier", {
-            "object_name": "Validated", "modifier_type": "SUBSURF",
-            "settings": {"levels": 2, "misspelled": 1},
-        })
+        bridge_client.call(
+            "add_modifier",
+            {
+                "object_name": "Validated",
+                "modifier_type": "SUBSURF",
+                "settings": {"levels": 2, "misspelled": 1},
+            },
+        )
     assert bridge_client.call("list_modifiers", {"object_name": "Validated"})["count"] == 0
     with pytest.raises(BridgeError):
         bridge_client.call("create_collection", {"name": "Orphan", "parent_name": "Missing"})
     collections = bridge_client.call("list_collections")["collections"]
     assert "Orphan" not in {c["name"] for c in collections}
+
+
+def test_bridge_rejects_malformed_envelopes(bridge_client: BlenderBridgeClient):
+    import json
+
+    for raw in (b"[]\n", b"null\n", b"\xff\n"):
+        with socket.create_connection(
+            (bridge_client.config.host, bridge_client.config.port)
+        ) as conn:
+            conn.sendall(raw)
+            response = json.loads(conn.makefile("rb").readline())
+            assert response["ok"] is False
+            assert response["code"] == "INVALID_REQUEST"
+    assert bridge_client.call("health")["bridge_running"] is True

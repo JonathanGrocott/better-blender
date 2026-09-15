@@ -36,9 +36,12 @@ class BridgeResponse:
     ok: bool
     result: dict[str, Any] | None = None
     error: str | None = None
+    code: str | None = None
 
     @classmethod
-    def from_json(cls, payload: dict[str, Any]) -> BridgeResponse:
+    def from_json(cls, payload: Any) -> BridgeResponse:
+        if not isinstance(payload, dict):
+            raise ValueError("Response must be an object")
         raw_id = payload.get("id")
         if not isinstance(raw_id, str):
             raise ValueError("Missing or invalid response id")
@@ -60,4 +63,11 @@ class BridgeResponse:
         else:
             raise ValueError("Invalid error value")
 
-        return cls(request_id=raw_id, ok=ok_raw, result=result, error=error)
+        code = payload.get("code")
+        if code is not None and not isinstance(code, str):
+            raise ValueError("Invalid error code")
+        if ok_raw and (result is None or error is not None):
+            raise ValueError("Success requires an object result and no error")
+        if not ok_raw and (not error or result_raw is not None):
+            raise ValueError("Failure requires an error and no result")
+        return cls(request_id=raw_id, ok=ok_raw, result=result, error=error, code=code)

@@ -58,6 +58,11 @@ class BridgeRuntime:
 
 _RUNTIME: BridgeRuntime | None = None
 _TIMER_REGISTERED = False
+MAX_REQUEST_BYTES = 1024 * 1024
+MAX_RESPONSE_BYTES = 16 * 1024 * 1024
+MAX_CONNECTIONS = 16
+MAX_QUEUED_COMMANDS = 128
+READ_TIMEOUT = 5.0
 
 
 class _BridgeTCPServer(socketserver.ThreadingTCPServer):
@@ -72,19 +77,57 @@ class _BridgeTCPServer(socketserver.ThreadingTCPServer):
     ) -> None:
         super().__init__(server_address, handler_cls)
         self.runtime = runtime
+        self.slots = threading.BoundedSemaphore(MAX_CONNECTIONS)
+
+    def process_request(self, request, client_address):
+        if not self.slots.acquire(blocking=False):
+            try:
+                request.settimeout(0.1)
+                request.sendall(
+                    b'{"id":"unknown","ok":false,"error":"Bridge busy","code":"BUSY"}\n'
+                )
+            except OSError:
+                pass
+            finally:
+                self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except Exception:
+            self.slots.release()
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self.slots.release()
 
 
 class _BridgeRequestHandler(socketserver.StreamRequestHandler):
     def handle(self) -> None:
         runtime = self.server.runtime  # type: ignore[attr-defined]
-        line = self.rfile.readline()
-        if not line:
-            return
-
         try:
-            payload = json.loads(line.decode("utf-8"))
-        except json.JSONDecodeError:
-            self._write({"id": "unknown", "ok": False, "error": "Invalid JSON"})
+            deadline = time.monotonic() + READ_TIMEOUT
+            data = bytearray()
+            while b"\n" not in data:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("Request read deadline exceeded")
+                self.request.settimeout(remaining)
+                chunk = self.request.recv(min(65536, MAX_REQUEST_BYTES + 1 - len(data)))
+                if not chunk:
+                    raise ValueError("Incomplete request")
+                data.extend(chunk)
+                if len(data) > MAX_REQUEST_BYTES:
+                    raise ValueError("Request exceeds 1 MiB limit")
+            payload = json.loads(data.split(b"\n", 1)[0].decode("utf-8"))
+            if not isinstance(payload, dict):
+                raise ValueError("Request must be an object")
+        except (ValueError, OSError) as exc:
+            self._write(
+                {"id": "unknown", "ok": False, "error": str(exc), "code": "INVALID_REQUEST"}
+            )
             return
 
         request_id = payload.get("id")
@@ -127,7 +170,13 @@ class _BridgeRequestHandler(socketserver.StreamRequestHandler):
             self._write({"id": request_id, "ok": False, "error": "Bridge not initialized"})
             return
 
-        runtime.command_queue.put(command)
+        try:
+            runtime.command_queue.put_nowait(command)
+        except queue.Full:
+            self._write(
+                {"id": request_id, "ok": False, "error": "Command queue full", "code": "BUSY"}
+            )
+            return
 
         try:
             response = result_queue.get(timeout=max(0, command.deadline - time.monotonic()))
@@ -147,7 +196,8 @@ class _BridgeRequestHandler(socketserver.StreamRequestHandler):
                         "error": (
                             "Request timed out while executing; outcome unknown. "
                             "The operation may still complete. Do not retry automatically."
-                            if running else "Request expired before execution; no changes made."
+                            if running
+                            else "Request expired before execution; no changes made."
                         ),
                         "code": "OUTCOME_UNKNOWN" if running else "EXPIRED",
                     }
@@ -155,8 +205,28 @@ class _BridgeRequestHandler(socketserver.StreamRequestHandler):
         self._write(response)
 
     def _write(self, payload: dict[str, Any]) -> None:
-        self.wfile.write(json.dumps(payload).encode("utf-8") + b"\n")
-        self.wfile.flush()
+        try:
+            raw = json.dumps(payload, allow_nan=False).encode("utf-8") + b"\n"
+            if len(raw) > MAX_RESPONSE_BYTES:
+                raise ValueError("Response exceeds 16 MiB limit")
+        except (TypeError, ValueError):
+            raw = (
+                json.dumps(
+                    {
+                        "id": payload.get("id", "unknown"),
+                        "ok": False,
+                        "error": "Response cannot be serialized within limits",
+                        "code": "INVALID_RESULT",
+                    }
+                ).encode()
+                + b"\n"
+            )
+        try:
+            self.request.settimeout(5.0)
+            self.wfile.write(raw)
+            self.wfile.flush()
+        except OSError:
+            pass  # A disconnected caller must not affect the main-thread queue.
 
 
 def _to_vector3(raw: Any, field: str) -> tuple[float, float, float]:
@@ -569,13 +639,16 @@ def _preflight(method: str, params: dict[str, Any]) -> None:
         if value is None:
             continue
         resolver = {
-            "target_name": _require_object, "parent_name": _require_collection,
+            "target_name": _require_object,
+            "parent_name": _require_collection,
             "view_layer_name": _require_view_layer,
-            "material_name": _require_material, "action_name": _require_action,
+            "material_name": _require_material,
+            "action_name": _require_action,
         }[key]
         resolver(value)
     if params.get("object_name") is not None and method not in {
-        "workflow_setup_studio", "workflow_turntable_render",
+        "workflow_setup_studio",
+        "workflow_turntable_render",
     }:
         _require_object(params["object_name"])
     if "frame_start" in params or "frame_end" in params:
@@ -2338,11 +2411,14 @@ def _drain_command_queue() -> float | None:
         with command.lock:
             if command.state == "expired" or time.monotonic() >= command.deadline:
                 command.state = "expired"
-                command.result_queue.put_nowait({
-                    "id": command.request_id, "ok": False,
-                    "error": "Request expired before execution; no changes made.",
-                    "code": "EXPIRED",
-                })
+                command.result_queue.put_nowait(
+                    {
+                        "id": command.request_id,
+                        "ok": False,
+                        "error": "Request expired before execution; no changes made.",
+                        "code": "EXPIRED",
+                    }
+                )
                 continue
             command.state = "running"
 
@@ -2414,7 +2490,7 @@ def start_bridge_with_config(
         timeout_seconds=timeout_seconds,
         allow_unsafe_code=allow_unsafe_code,
         running=True,
-        command_queue=queue.Queue(),
+        command_queue=queue.Queue(maxsize=MAX_QUEUED_COMMANDS),
     )
 
     server = _BridgeTCPServer((runtime.host, runtime.port), _BridgeRequestHandler, runtime)

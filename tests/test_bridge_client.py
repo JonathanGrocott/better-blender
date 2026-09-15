@@ -65,3 +65,36 @@ def test_bridge_client_error() -> None:
     server.shutdown()
     server.server_close()
     thread.join(timeout=1.0)
+
+
+def test_buffered_reader_rejects_truncated_and_oversized_messages(monkeypatch):
+    import socket
+
+    import better_blender_mcp.bridge_client as module
+
+    monkeypatch.setattr(module, "MAX_RESPONSE_BYTES", 32)
+    for data, expected in [(b'{"ok":true}', "INVALID_MESSAGE"), (b"x" * 33, "RESPONSE_TOO_LARGE")]:
+        left, right = socket.socketpair()
+        with left, right:
+            right.sendall(data)
+            right.shutdown(socket.SHUT_WR)
+            with pytest.raises(BridgeError) as exc:
+                BlenderBridgeClient._read_line(left)
+            assert exc.value.code == expected
+
+
+def test_buffered_reader_handles_fragmented_utf8():
+    import socket
+
+    left, right = socket.socketpair()
+    with left, right:
+        data = '{"value":"é"}\n'.encode()
+
+        def send():
+            for byte in data:
+                right.sendall(bytes([byte]))
+
+        sender = threading.Thread(target=send)
+        sender.start()
+        assert BlenderBridgeClient._read_line(left) == '{"value":"é"}'
+        sender.join()
