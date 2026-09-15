@@ -303,3 +303,25 @@ def test_delete_object_returns_success(bridge_client: BlenderBridgeClient) -> No
     bridge_client.call("create_primitive", {"name": "DeleteMe"})
     assert bridge_client.call("delete_object", {"name": "DeleteMe"}) == {"deleted": "DeleteMe"}
     assert "DeleteMe" not in {obj["name"] for obj in bridge_client.call("list_objects")["objects"]}
+
+
+def test_geometry_edits_preserve_existing_output(bridge_client: BlenderBridgeClient) -> None:
+    bridge_client.call("create_primitive", {"name": "GraphSubject"})
+    params = {"object_name": "GraphSubject"}
+    bridge_client.call("create_geometry_nodes_modifier", params)
+    bridge_client.call("add_geometry_node", {
+        **params, "node_type": "GeometryNodeTransform", "node_name": "Transform",
+    })
+    bridge_client.call("link_geometry_nodes", {
+        **params, "from_node": "Group Input", "from_socket": "Geometry",
+        "to_node": "Transform", "to_socket": "Geometry",
+    })
+    bridge_client.call("link_geometry_nodes", {
+        **params, "from_node": "Transform", "from_socket": "Geometry",
+        "to_node": "Group Output", "to_socket": "Geometry",
+    })
+    before = bridge_client.call("list_geometry_nodes", params)["links"]
+    bridge_client.call("add_geometry_node", {**params, "node_type": "ShaderNodeMath"})
+    bridge_client.call("create_geometry_nodes_modifier", params)
+    assert bridge_client.call("list_geometry_nodes", params)["links"] == before
+    assert any(link["from_node"] == "Transform" for link in before)

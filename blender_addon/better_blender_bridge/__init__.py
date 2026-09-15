@@ -255,6 +255,7 @@ def _require_modifier(obj: bpy.types.Object, modifier_name: Any) -> bpy.types.Mo
 
 def _ensure_geometry_nodes_group(modifier: bpy.types.Modifier) -> bpy.types.NodeTree:
     node_group = modifier.node_group
+    created = node_group is None
     if node_group is None:
         node_group = bpy.data.node_groups.new(name=f"{modifier.name}Tree", type="GeometryNodeTree")
         modifier.node_group = node_group
@@ -288,7 +289,8 @@ def _ensure_geometry_nodes_group(modifier: bpy.types.Modifier) -> bpy.types.Node
             node_group.outputs.new("NodeSocketGeometry", "Geometry")
 
     if (
-        "Geometry" in group_input.outputs
+        created
+        and "Geometry" in group_input.outputs
         and "Geometry" in group_output.inputs
         and not any(
             link.from_socket == group_input.outputs["Geometry"]
