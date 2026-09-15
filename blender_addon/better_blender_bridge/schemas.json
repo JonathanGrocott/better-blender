@@ -261,6 +261,20 @@
     "title": "assign_materialArguments",
     "type": "object"
   },
+  "cancel_job": {
+    "additionalProperties": false,
+    "properties": {
+      "job_id": {
+        "title": "Job Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "job_id"
+    ],
+    "title": "cancel_jobArguments",
+    "type": "object"
+  },
   "capture_viewport_screenshot": {
     "additionalProperties": false,
     "properties": {
@@ -987,6 +1001,20 @@
       "filepath"
     ],
     "title": "export_fileArguments",
+    "type": "object"
+  },
+  "get_job_status": {
+    "additionalProperties": false,
+    "properties": {
+      "job_id": {
+        "title": "Job Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "job_id"
+    ],
+    "title": "get_job_statusArguments",
     "type": "object"
   },
   "get_object_info": {
@@ -2218,6 +2246,27 @@
       }
     },
     "title": "set_viewport_viewArguments",
+    "type": "object"
+  },
+  "start_render_job": {
+    "additionalProperties": false,
+    "properties": {
+      "method": {
+        "enum": [
+          "render_still",
+          "render_animation",
+          "workflow_turntable_render"
+        ],
+        "type": "string"
+      },
+      "params": {
+        "type": "object"
+      }
+    },
+    "required": [
+      "method",
+      "params"
+    ],
     "type": "object"
   },
   "workflow_create_turntable": {

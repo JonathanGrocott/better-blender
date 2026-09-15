@@ -506,3 +506,51 @@ def test_bridge_rejects_malformed_envelopes(bridge_client: BlenderBridgeClient):
             assert response["ok"] is False
             assert response["code"] == "INVALID_REQUEST"
     assert bridge_client.call("health")["bridge_running"] is True
+
+
+def test_render_job_completion_and_cancellation(bridge_client: BlenderBridgeClient, tmp_path: Path):
+    bridge_client.call("workflow_setup_studio", {"object_name": "JobSubject"})
+    before = bridge_client.call("get_scene_info")
+    output = tmp_path / "job.png"
+    job = bridge_client.call(
+        "start_render_job",
+        {
+            "method": "render_still",
+            "params": {
+                "filepath": str(output),
+                "engine": "BLENDER_WORKBENCH",
+                "resolution_x": 64,
+                "resolution_y": 64,
+            },
+        },
+    )
+
+    def wait_terminal(job_id):
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            state = bridge_client.call("get_job_status", {"job_id": job_id})
+            if state["state"] not in {"running", "cancelling"}:
+                return state
+            time.sleep(0.05)
+        raise AssertionError("Job did not finish")
+
+    completed = wait_terminal(job["job_id"])
+    assert completed["state"] == "completed", completed
+    assert completed["result"]["rendered"] is True
+    assert output.exists()
+    assert bridge_client.call("get_scene_info") == before
+    job = bridge_client.call(
+        "start_render_job",
+        {
+            "method": "render_animation",
+            "params": {
+                "filepath": str(tmp_path / "long_"),
+                "engine": "BLENDER_WORKBENCH",
+                "frame_start": 1,
+                "frame_end": 10000,
+            },
+        },
+    )
+    bridge_client.call("cancel_job", {"job_id": job["job_id"]})
+    assert wait_terminal(job["job_id"])["state"] == "cancelled"
+    assert bridge_client.call("health")["bridge_running"] is True

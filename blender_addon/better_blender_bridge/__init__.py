@@ -9,7 +9,9 @@ from __future__ import annotations
 import json
 import math
 import queue
+import shutil
 import socketserver
+import tempfile
 import threading
 import time
 from dataclasses import dataclass, field
@@ -19,6 +21,7 @@ from typing import Any
 import bpy
 from mathutils import Quaternion, Vector
 
+from .jobs import RenderJobs
 from .validation import validate_command
 
 bl_info = {
@@ -54,6 +57,7 @@ class BridgeRuntime:
     server: socketserver.ThreadingTCPServer | None = None
     thread: threading.Thread | None = None
     command_queue: queue.Queue[BridgeCommand] | None = None
+    render_jobs: RenderJobs = field(default_factory=RenderJobs)
 
 
 _RUNTIME: BridgeRuntime | None = None
@@ -145,6 +149,20 @@ class _BridgeRequestHandler(socketserver.StreamRequestHandler):
 
         if not isinstance(params, dict):
             self._write({"id": request_id, "ok": False, "error": "params must be an object"})
+            return
+
+        if method in {"get_job_status", "cancel_job"}:
+            try:
+                validate_command(method, params)
+                operation = (
+                    runtime.render_jobs.status
+                    if method == "get_job_status"
+                    else (runtime.render_jobs.cancel)
+                )
+                result = operation(params["job_id"])
+                self._write({"id": request_id, "ok": True, "result": result})
+            except ValueError as exc:
+                self._write({"id": request_id, "ok": False, "error": str(exc)})
             return
 
         timeout = payload.get("timeout_seconds", runtime.timeout_seconds)
@@ -669,6 +687,31 @@ def _preflight(method: str, params: dict[str, Any]) -> None:
 
 
 def _dispatch_command(method: str, params: dict[str, Any]) -> dict[str, Any]:
+    if method == "start_render_job":
+        validate_command(method, params)
+        render_method = params["method"]
+        render_params = params["params"]
+        _preflight(render_method, render_params)
+        if _RUNTIME is None:
+            raise ValueError("Bridge runtime unavailable")
+        directory = Path(tempfile.mkdtemp(prefix="better-blender-render-"))
+        try:
+            snapshot = directory / "scene.blend"
+            # Capture dependencies with absolute paths without changing the user's file.
+            bpy.data.libraries.write(str(snapshot), {bpy.context.scene}, path_remap="ABSOLUTE")
+            return _RUNTIME.render_jobs.submit(
+                bpy.app.binary_path,
+                snapshot,
+                {
+                    "method": render_method,
+                    "params": render_params,
+                    "scene_name": bpy.context.scene.name,
+                },
+                directory,
+            )
+        except Exception:
+            shutil.rmtree(directory, ignore_errors=True)
+            raise
     _preflight(method, params)
     if method == "health":
         return {
@@ -2320,6 +2363,9 @@ def _dispatch_command(method: str, params: dict[str, Any]) -> dict[str, Any]:
 
 def _supported_methods() -> list[str]:
     return [
+        "start_render_job",
+        "get_job_status",
+        "cancel_job",
         "health",
         "new_scene",
         "open_blend",
@@ -2516,6 +2562,7 @@ def stop_bridge() -> None:
 
     runtime = _RUNTIME
     runtime.running = False
+    runtime.render_jobs.shutdown()
 
     if runtime.server is not None:
         runtime.server.shutdown()

@@ -924,7 +924,7 @@ def create_server(client: BlenderBridgeClient) -> Any:
         resolution_y: PositiveInt = 512,
         samples: PositiveInt | None = None,
     ) -> dict[str, Any]:
-        """One-call turntable workflow: setup, animate, and render."""
+        """Start a turntable render job in a scene snapshot; the open scene stays unchanged."""
 
         params: dict[str, Any] = {
             "output_path": output_path,
@@ -944,7 +944,9 @@ def create_server(client: BlenderBridgeClient) -> Any:
             params["engine"] = engine
         if samples is not None:
             params["samples"] = samples
-        return await client.acall("workflow_turntable_render", params)
+        return await client.acall(
+            "start_render_job", {"method": "workflow_turntable_render", "params": params}
+        )
 
     @server.tool(name="render_still")
     async def render_still(
@@ -954,7 +956,7 @@ def create_server(client: BlenderBridgeClient) -> Any:
         resolution_y: PositiveInt | None = None,
         samples: PositiveInt | None = None,
     ) -> dict[str, Any]:
-        """Render a still frame to disk."""
+        """Start a still render job from a scene snapshot; poll get_job_status for results."""
 
         params: dict[str, Any] = {"filepath": filepath}
         if engine is not None:
@@ -966,7 +968,7 @@ def create_server(client: BlenderBridgeClient) -> Any:
         if samples is not None:
             params["samples"] = samples
 
-        return await client.acall("render_still", params)
+        return await client.acall("start_render_job", {"method": "render_still", "params": params})
 
     @server.tool(name="render_animation")
     async def render_animation(
@@ -975,7 +977,7 @@ def create_server(client: BlenderBridgeClient) -> Any:
         frame_start: int | None = None,
         frame_end: int | None = None,
     ) -> dict[str, Any]:
-        """Render animation frames to disk sequence."""
+        """Start an animation render job; poll get_job_status or use cancel_job."""
 
         params: dict[str, Any] = {"filepath": filepath}
         if engine is not None:
@@ -984,7 +986,9 @@ def create_server(client: BlenderBridgeClient) -> Any:
             params["frame_start"] = frame_start
         if frame_end is not None:
             params["frame_end"] = frame_end
-        return await client.acall("render_animation", params)
+        return await client.acall(
+            "start_render_job", {"method": "render_animation", "params": params}
+        )
 
     @server.tool(name="import_file")
     async def import_file(filepath: str, file_type: str | None = None) -> dict[str, Any]:
@@ -1015,6 +1019,16 @@ def create_server(client: BlenderBridgeClient) -> Any:
         """Execute Python code in Blender when unsafe mode is enabled."""
 
         return await client.acall("execute_code", {"code": code})
+
+    @server.tool(name="get_job_status")
+    async def get_job_status(job_id: str) -> dict[str, Any]:
+        """Get job state/result/error. Retained for 32 finished jobs or until bridge restart."""
+        return await client.acall("get_job_status", {"job_id": job_id})
+
+    @server.tool(name="cancel_job")
+    async def cancel_job(job_id: str) -> dict[str, Any]:
+        """Stop an isolated render worker. Already-written output files are retained."""
+        return await client.acall("cancel_job", {"job_id": job_id})
 
     return server
 

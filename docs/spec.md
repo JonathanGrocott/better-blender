@@ -143,3 +143,15 @@ Failure:
 - Long-running jobs (`job_id`, poll/cancel methods).
 - Safe mode policy matrix (`read_only`, `normal`, `unsafe`).
 - Optional stream transport and event subscriptions.
+
+## Render jobs
+
+MCP `render_still`, `render_animation`, and `workflow_turntable_render` now return a
+`job_id` and state immediately after capturing the scene. Poll `get_job_status` for
+`running`, `completed`, `failed`, `cancelling`, or `cancelled`, including result/error.
+`cancel_job` terminates only the isolated render worker; partial output files remain.
+The open scene and its file path are unchanged, including for turntable setup.
+External assets must remain available while the job runs. Two render workers may run
+at once. The bridge keeps 32 completed job records in memory; restart clears history
+and stops workers. Temporary snapshots are removed after completion. Existing direct
+bridge render methods remain synchronous for compatibility.
