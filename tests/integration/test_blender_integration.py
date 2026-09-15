@@ -423,3 +423,27 @@ finally:
          "--python-expr", code], capture_output=True, text=True, timeout=30,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_invalid_requests_leave_scene_unchanged(bridge_client: BlenderBridgeClient) -> None:
+    from better_blender_mcp.bridge_client import BridgeError
+
+    bridge_client.call("create_primitive", {"name": "Validated"})
+    before = bridge_client.call("get_object_info", {"name": "Validated"})
+    for params in [
+        {"name": "Validated", "location": [9, 8, 7], "scale": [1]},
+        {"name": "Validated", "location": [9, 8, 7], "typo": True},
+    ]:
+        with pytest.raises(BridgeError):
+            bridge_client.call("set_object_transform", params)
+        assert bridge_client.call("get_object_info", {"name": "Validated"}) == before
+    with pytest.raises(BridgeError):
+        bridge_client.call("add_modifier", {
+            "object_name": "Validated", "modifier_type": "SUBSURF",
+            "settings": {"levels": 2, "misspelled": 1},
+        })
+    assert bridge_client.call("list_modifiers", {"object_name": "Validated"})["count"] == 0
+    with pytest.raises(BridgeError):
+        bridge_client.call("create_collection", {"name": "Orphan", "parent_name": "Missing"})
+    collections = bridge_client.call("list_collections")["collections"]
+    assert "Orphan" not in {c["name"] for c in collections}

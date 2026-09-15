@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any, Literal
+
+from pydantic import Field
 
 from better_blender_mcp.bridge_client import BlenderBridgeClient
 from better_blender_mcp.config import load_config_from_env
@@ -13,6 +15,24 @@ except ImportError as exc:  # pragma: no cover - dependency import at runtime
     raise RuntimeError(
         "The 'mcp' package is required. Install dependencies with 'pip install -e .[dev]'."
     ) from exc
+
+
+Number = Annotated[float, Field(allow_inf_nan=False)]
+Vector3 = Annotated[list[Number], Field(min_length=3, max_length=3)]
+Rotation = Annotated[Vector3, Field(description="Local Euler rotation in radians (XYZ).")]
+Quaternion4 = Annotated[list[Number], Field(min_length=4, max_length=4)]
+Color4 = Annotated[list[Annotated[float, Field(ge=0, le=1)]], Field(min_length=4, max_length=4)]
+Positive = Annotated[float, Field(gt=0, allow_inf_nan=False)]
+NonNegative = Annotated[float, Field(ge=0, allow_inf_nan=False)]
+UnitFloat = Annotated[float, Field(ge=0, le=1)]
+PositiveInt = Annotated[int, Field(gt=0)]
+Primitive = Literal[
+    "CUBE", "UV_SPHERE", "ICO_SPHERE", "CYLINDER", "CONE", "PLANE", "TORUS", "MONKEY"
+]
+Axis = Literal["X", "Y", "Z"]
+View = Literal["FRONT", "BACK", "LEFT", "RIGHT", "TOP", "BOTTOM", "CAMERA", "PERSP", "ORTHO"]
+Shading = Literal["WIREFRAME", "SOLID", "MATERIAL", "RENDERED"]
+LightType = Literal["POINT", "SUN", "SPOT", "AREA"]
 
 
 def create_server(client: BlenderBridgeClient) -> Any:
@@ -58,7 +78,7 @@ def create_server(client: BlenderBridgeClient) -> Any:
         frame_start: int | None = None,
         frame_end: int | None = None,
         frame_current: int | None = None,
-        fps: int | None = None,
+        fps: PositiveInt | None = None,
     ) -> dict[str, Any]:
         """Set timeline start/end/current frame and fps."""
 
@@ -174,12 +194,12 @@ def create_server(client: BlenderBridgeClient) -> Any:
 
     @server.tool(name="create_primitive")
     async def create_primitive(
-        primitive: str = "CUBE",
+        primitive: Primitive = "CUBE",
         name: str | None = None,
-        size: float = 2.0,
-        location: list[float] | None = None,
-        rotation: list[float] | None = None,
-        scale: list[float] | None = None,
+        size: Positive = 2.0,
+        location: Vector3 | None = None,
+        rotation: Rotation | None = None,
+        scale: Vector3 | None = None,
     ) -> dict[str, Any]:
         """Create a mesh primitive."""
 
@@ -203,9 +223,9 @@ def create_server(client: BlenderBridgeClient) -> Any:
     @server.tool(name="set_object_transform")
     async def set_object_transform(
         name: str,
-        location: list[float] | None = None,
-        rotation: list[float] | None = None,
-        scale: list[float] | None = None,
+        location: Vector3 | None = None,
+        rotation: Rotation | None = None,
+        scale: Vector3 | None = None,
     ) -> dict[str, Any]:
         """Set transform values for an object."""
 
@@ -236,9 +256,9 @@ def create_server(client: BlenderBridgeClient) -> Any:
     async def keyframe_transform(
         name: str,
         frame: int,
-        location: list[float] | None = None,
-        rotation: list[float] | None = None,
-        scale: list[float] | None = None,
+        location: Vector3 | None = None,
+        rotation: Rotation | None = None,
+        scale: Vector3 | None = None,
     ) -> dict[str, Any]:
         """Set object transform values and insert keyframes at a frame."""
 
@@ -394,7 +414,9 @@ def create_server(client: BlenderBridgeClient) -> Any:
 
     @server.tool(name="remove_nla_strip")
     async def remove_nla_strip(
-        object_name: str, track_name: str, strip_name: str,
+        object_name: str,
+        track_name: str,
+        strip_name: str,
     ) -> dict[str, Any]:
         """Remove an NLA strip from a track."""
 
@@ -608,9 +630,9 @@ def create_server(client: BlenderBridgeClient) -> Any:
     @server.tool(name="create_material")
     async def create_material(
         name: str,
-        base_color: list[float] | None = None,
-        roughness: float = 0.5,
-        metallic: float = 0.0,
+        base_color: Color4 | None = None,
+        roughness: UnitFloat = 0.5,
+        metallic: UnitFloat = 0.0,
     ) -> dict[str, Any]:
         """Create or update a material with principled parameters."""
 
@@ -643,8 +665,8 @@ def create_server(client: BlenderBridgeClient) -> Any:
     @server.tool(name="create_camera")
     async def create_camera(
         name: str = "Camera",
-        location: list[float] | None = None,
-        rotation: list[float] | None = None,
+        location: Vector3 | None = None,
+        rotation: Rotation | None = None,
         set_active: bool = True,
     ) -> dict[str, Any]:
         """Create a camera object and optionally set it active."""
@@ -668,10 +690,10 @@ def create_server(client: BlenderBridgeClient) -> Any:
     @server.tool(name="create_light")
     async def create_light(
         name: str = "Light",
-        light_type: str = "POINT",
-        energy: float = 1000.0,
-        location: list[float] | None = None,
-        rotation: list[float] | None = None,
+        light_type: LightType = "POINT",
+        energy: NonNegative = 1000.0,
+        location: Vector3 | None = None,
+        rotation: Rotation | None = None,
     ) -> dict[str, Any]:
         """Create a light object."""
 
@@ -688,7 +710,8 @@ def create_server(client: BlenderBridgeClient) -> Any:
 
     @server.tool(name="enable_compositor")
     async def enable_compositor(
-        use_nodes: bool = True, clear_nodes: bool = False,
+        use_nodes: bool = True,
+        clear_nodes: bool = False,
     ) -> dict[str, Any]:
         """Enable compositor nodes and optionally reset node tree."""
 
@@ -765,12 +788,12 @@ def create_server(client: BlenderBridgeClient) -> Any:
 
     @server.tool(name="set_viewport_view")
     async def set_viewport_view(
-        view: str | None = None,
-        location: list[float] | None = None,
-        rotation_quaternion: list[float] | None = None,
-        distance: float | None = None,
-        lens: float | None = None,
-        shading_type: str | None = None,
+        view: View | None = None,
+        location: Vector3 | None = None,
+        rotation_quaternion: Quaternion4 | None = None,
+        distance: Positive | None = None,
+        lens: Positive | None = None,
+        shading_type: Shading | None = None,
     ) -> dict[str, Any]:
         """Adjust a VIEW_3D viewport camera for better captures."""
 
@@ -792,16 +815,16 @@ def create_server(client: BlenderBridgeClient) -> Any:
     @server.tool(name="capture_viewport_screenshot")
     async def capture_viewport_screenshot(
         filepath: str,
-        view: str | None = None,
-        location: list[float] | None = None,
-        rotation_quaternion: list[float] | None = None,
-        distance: float | None = None,
-        lens: float | None = None,
-        shading_type: str | None = None,
-        resolution_x: int | None = None,
-        resolution_y: int | None = None,
+        view: View | None = None,
+        location: Vector3 | None = None,
+        rotation_quaternion: Quaternion4 | None = None,
+        distance: Positive | None = None,
+        lens: Positive | None = None,
+        shading_type: Shading | None = None,
+        resolution_x: PositiveInt | None = None,
+        resolution_y: PositiveInt | None = None,
         engine: str | None = None,
-        samples: int | None = None,
+        samples: PositiveInt | None = None,
         fallback_to_render: bool = True,
     ) -> dict[str, Any]:
         """Capture viewport image; fall back to regular render in headless mode."""
@@ -835,15 +858,15 @@ def create_server(client: BlenderBridgeClient) -> Any:
     @server.tool(name="workflow_setup_studio")
     async def workflow_setup_studio(
         object_name: str = "Subject",
-        primitive: str = "CUBE",
-        size: float = 2.0,
+        primitive: Primitive = "CUBE",
+        size: Positive = 2.0,
         add_ground: bool = True,
         camera_name: str = "WorkflowCamera",
-        camera_distance: float = 6.0,
-        camera_height: float = 3.0,
-        key_energy: float = 1200.0,
-        fill_energy: float = 600.0,
-        rim_energy: float = 900.0,
+        camera_distance: Positive = 6.0,
+        camera_height: Number = 3.0,
+        key_energy: NonNegative = 1200.0,
+        fill_energy: NonNegative = 600.0,
+        rim_energy: NonNegative = 900.0,
     ) -> dict[str, Any]:
         """Set up a studio-style scene with subject, camera, and three-point lighting."""
 
@@ -868,8 +891,8 @@ def create_server(client: BlenderBridgeClient) -> Any:
         object_name: str,
         frame_start: int = 1,
         frame_end: int = 120,
-        rotations: float = 1.0,
-        axis: str = "Z",
+        rotations: Number = 1.0,
+        axis: Axis = "Z",
     ) -> dict[str, Any]:
         """Create turntable keyframes on an object."""
 
@@ -890,16 +913,16 @@ def create_server(client: BlenderBridgeClient) -> Any:
         object_name: str = "Subject",
         frame_start: int = 1,
         frame_end: int = 120,
-        rotations: float = 1.0,
-        axis: str = "Z",
+        rotations: Number = 1.0,
+        axis: Axis = "Z",
         setup_studio: bool = True,
-        primitive: str = "CUBE",
-        size: float = 2.0,
+        primitive: Primitive = "CUBE",
+        size: Positive = 2.0,
         add_ground: bool = True,
         engine: str | None = None,
-        resolution_x: int = 512,
-        resolution_y: int = 512,
-        samples: int | None = None,
+        resolution_x: PositiveInt = 512,
+        resolution_y: PositiveInt = 512,
+        samples: PositiveInt | None = None,
     ) -> dict[str, Any]:
         """One-call turntable workflow: setup, animate, and render."""
 
@@ -927,9 +950,9 @@ def create_server(client: BlenderBridgeClient) -> Any:
     async def render_still(
         filepath: str,
         engine: str | None = None,
-        resolution_x: int | None = None,
-        resolution_y: int | None = None,
-        samples: int | None = None,
+        resolution_x: PositiveInt | None = None,
+        resolution_y: PositiveInt | None = None,
+        samples: PositiveInt | None = None,
     ) -> dict[str, Any]:
         """Render a still frame to disk."""
 

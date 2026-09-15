@@ -1,0 +1,2446 @@
+{
+  "add_compositor_node": {
+    "additionalProperties": false,
+    "properties": {
+      "node_name": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Node Name"
+      },
+      "node_type": {
+        "title": "Node Type",
+        "type": "string"
+      }
+    },
+    "required": [
+      "node_type"
+    ],
+    "title": "add_compositor_nodeArguments",
+    "type": "object"
+  },
+  "add_constraint": {
+    "additionalProperties": false,
+    "properties": {
+      "constraint_type": {
+        "title": "Constraint Type",
+        "type": "string"
+      },
+      "name": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Name"
+      },
+      "object_name": {
+        "title": "Object Name",
+        "type": "string"
+      },
+      "target_name": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Target Name"
+      }
+    },
+    "required": [
+      "object_name",
+      "constraint_type"
+    ],
+    "title": "add_constraintArguments",
+    "type": "object"
+  },
+  "add_geometry_input": {
+    "additionalProperties": false,
+    "properties": {
+      "default_value": {
+        "anyOf": [
+          {},
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Default Value"
+      },
+      "input_name": {
+        "title": "Input Name",
+        "type": "string"
+      },
+      "modifier_name": {
+        "default": "GeometryNodes",
+        "title": "Modifier Name",
+        "type": "string"
+      },
+      "object_name": {
+        "title": "Object Name",
+        "type": "string"
+      },
+      "socket_type": {
+        "default": "NodeSocketFloat",
+        "title": "Socket Type",
+        "type": "string"
+      }
+    },
+    "required": [
+      "object_name",
+      "input_name"
+    ],
+    "title": "add_geometry_inputArguments",
+    "type": "object"
+  },
+  "add_geometry_node": {
+    "additionalProperties": false,
+    "properties": {
+      "modifier_name": {
+        "default": "GeometryNodes",
+        "title": "Modifier Name",
+        "type": "string"
+      },
+      "node_name": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Node Name"
+      },
+      "node_type": {
+        "title": "Node Type",
+        "type": "string"
+      },
+      "object_name": {
+        "title": "Object Name",
+        "type": "string"
+      }
+    },
+    "required": [
+      "object_name",
+      "node_type"
+    ],
+    "title": "add_geometry_nodeArguments",
+    "type": "object"
+  },
+  "add_modifier": {
+    "additionalProperties": false,
+    "properties": {
+      "modifier_type": {
+        "title": "Modifier Type",
+        "type": "string"
+      },
+      "name": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Name"
+      },
+      "object_name": {
+        "title": "Object Name",
+        "type": "string"
+      },
+      "settings": {
+        "anyOf": [
+          {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Settings"
+      }
+    },
+    "required": [
+      "object_name",
+      "modifier_type"
+    ],
+    "title": "add_modifierArguments",
+    "type": "object"
+  },
+  "add_object_to_collection": {
+    "additionalProperties": false,
+    "properties": {
+      "collection_name": {
+        "title": "Collection Name",
+        "type": "string"
+      },
+      "object_name": {
+        "title": "Object Name",
+        "type": "string"
+      },
+      "unlink_from_others": {
+        "default": false,
+        "title": "Unlink From Others",
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "object_name",
+      "collection_name"
+    ],
+    "title": "add_object_to_collectionArguments",
+    "type": "object"
+  },
+  "apply_modifier": {
+    "additionalProperties": false,
+    "properties": {
+      "modifier_name": {
+        "title": "Modifier Name",
+        "type": "string"
+      },
+      "object_name": {
+        "title": "Object Name",
+        "type": "string"
+      }
+    },
+    "required": [
+      "object_name",
+      "modifier_name"
+    ],
+    "title": "apply_modifierArguments",
+    "type": "object"
+  },
+  "assign_material": {
+    "additionalProperties": false,
+    "properties": {
+      "material_name": {
+        "title": "Material Name",
+        "type": "string"
+      },
+      "object_name": {
+        "title": "Object Name",
+        "type": "string"
+      },
+      "slot_index": {
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Slot Index"
+      }
+    },
+    "required": [
+      "object_name",
+      "material_name"
+    ],
+    "title": "assign_materialArguments",
+    "type": "object"
+  },
+  "capture_viewport_screenshot": {
+    "additionalProperties": false,
+    "properties": {
+      "distance": {
+        "anyOf": [
+          {
+            "exclusiveMinimum": 0,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Distance"
+      },
+      "engine": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Engine"
+      },
+      "fallback_to_render": {
+        "default": true,
+        "title": "Fallback To Render",
+        "type": "boolean"
+      },
+      "filepath": {
+        "title": "Filepath",
+        "type": "string"
+      },
+      "lens": {
+        "anyOf": [
+          {
+            "exclusiveMinimum": 0,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Lens"
+      },
+      "location": {
+        "anyOf": [
+          {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 3,
+            "minItems": 3,
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Location"
+      },
+      "resolution_x": {
+        "anyOf": [
+          {
+            "exclusiveMinimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Resolution X"
+      },
+      "resolution_y": {
+        "anyOf": [
+          {
+            "exclusiveMinimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Resolution Y"
+      },
+      "rotation_quaternion": {
+        "anyOf": [
+          {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 4,
+            "minItems": 4,
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Rotation Quaternion"
+      },
+      "samples": {
+        "anyOf": [
+          {
+            "exclusiveMinimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Samples"
+      },
+      "shading_type": {
+        "anyOf": [
+          {
+            "enum": [
+              "WIREFRAME",
+              "SOLID",
+              "MATERIAL",
+              "RENDERED"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Shading Type"
+      },
+      "view": {
+        "anyOf": [
+          {
+            "enum": [
+              "FRONT",
+              "BACK",
+              "LEFT",
+              "RIGHT",
+              "TOP",
+              "BOTTOM",
+              "CAMERA",
+              "PERSP",
+              "ORTHO"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "View"
+      }
+    },
+    "required": [
+      "filepath"
+    ],
+    "title": "capture_viewport_screenshotArguments",
+    "type": "object"
+  },
+  "clear_animation_data": {
+    "additionalProperties": false,
+    "properties": {
+      "object_name": {
+        "title": "Object Name",
+        "type": "string"
+      }
+    },
+    "required": [
+      "object_name"
+    ],
+    "title": "clear_animation_dataArguments",
+    "type": "object"
+  },
+  "create_action": {
+    "additionalProperties": false,
+    "properties": {
+      "name": {
+        "title": "Name",
+        "type": "string"
+      },
+      "object_name": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Object Name"
+      },
+      "set_active": {
+        "default": true,
+        "title": "Set Active",
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "name"
+    ],
+    "title": "create_actionArguments",
+    "type": "object"
+  },
+  "create_camera": {
+    "additionalProperties": false,
+    "properties": {
+      "location": {
+        "anyOf": [
+          {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 3,
+            "minItems": 3,
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Location"
+      },
+      "name": {
+        "default": "Camera",
+        "title": "Name",
+        "type": "string"
+      },
+      "rotation": {
+        "anyOf": [
+          {
+            "description": "Local Euler rotation in radians (XYZ).",
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 3,
+            "minItems": 3,
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Rotation"
+      },
+      "set_active": {
+        "default": true,
+        "title": "Set Active",
+        "type": "boolean"
+      }
+    },
+    "title": "create_cameraArguments",
+    "type": "object"
+  },
+  "create_collection": {
+    "additionalProperties": false,
+    "properties": {
+      "link_to_scene": {
+        "default": true,
+        "title": "Link To Scene",
+        "type": "boolean"
+      },
+      "name": {
+        "title": "Name",
+        "type": "string"
+      },
+      "parent_name": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Parent Name"
+      }
+    },
+    "required": [
+      "name"
+    ],
+    "title": "create_collectionArguments",
+    "type": "object"
+  },
+  "create_geometry_nodes_modifier": {
+    "additionalProperties": false,
+    "properties": {
+      "modifier_name": {
+        "default": "GeometryNodes",
+        "title": "Modifier Name",
+        "type": "string"
+      },
+      "object_name": {
+        "title": "Object Name",
+        "type": "string"
+      }
+    },
+    "required": [
+      "object_name"
+    ],
+    "title": "create_geometry_nodes_modifierArguments",
+    "type": "object"
+  },
+  "create_light": {
+    "additionalProperties": false,
+    "properties": {
+      "energy": {
+        "default": 1000.0,
+        "minimum": 0,
+        "title": "Energy",
+        "type": "number"
+      },
+      "light_type": {
+        "default": "POINT",
+        "enum": [
+          "POINT",
+          "SUN",
+          "SPOT",
+          "AREA"
+        ],
+        "title": "Light Type",
+        "type": "string"
+      },
+      "location": {
+        "anyOf": [
+          {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 3,
+            "minItems": 3,
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Location"
+      },
+      "name": {
+        "default": "Light",
+        "title": "Name",
+        "type": "string"
+      },
+      "rotation": {
+        "anyOf": [
+          {
+            "description": "Local Euler rotation in radians (XYZ).",
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 3,
+            "minItems": 3,
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Rotation"
+      }
+    },
+    "title": "create_lightArguments",
+    "type": "object"
+  },
+  "create_material": {
+    "additionalProperties": false,
+    "properties": {
+      "base_color": {
+        "anyOf": [
+          {
+            "items": {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            "maxItems": 4,
+            "minItems": 4,
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Base Color"
+      },
+      "metallic": {
+        "default": 0.0,
+        "maximum": 1,
+        "minimum": 0,
+        "title": "Metallic",
+        "type": "number"
+      },
+      "name": {
+        "title": "Name",
+        "type": "string"
+      },
+      "roughness": {
+        "default": 0.5,
+        "maximum": 1,
+        "minimum": 0,
+        "title": "Roughness",
+        "type": "number"
+      }
+    },
+    "required": [
+      "name"
+    ],
+    "title": "create_materialArguments",
+    "type": "object"
+  },
+  "create_nla_strip": {
+    "additionalProperties": false,
+    "properties": {
+      "action_name": {
+        "title": "Action Name",
+        "type": "string"
+      },
+      "frame_start": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Frame Start"
+      },
+      "object_name": {
+        "title": "Object Name",
+        "type": "string"
+      },
+      "strip_name": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Strip Name"
+      },
+      "track_name": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Track Name"
+      }
+    },
+    "required": [
+      "object_name",
+      "action_name"
+    ],
+    "title": "create_nla_stripArguments",
+    "type": "object"
+  },
+  "create_primitive": {
+    "additionalProperties": false,
+    "properties": {
+      "location": {
+        "anyOf": [
+          {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 3,
+            "minItems": 3,
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Location"
+      },
+      "name": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Name"
+      },
+      "primitive": {
+        "default": "CUBE",
+        "enum": [
+          "CUBE",
+          "UV_SPHERE",
+          "ICO_SPHERE",
+          "CYLINDER",
+          "CONE",
+          "PLANE",
+          "TORUS",
+          "MONKEY"
+        ],
+        "title": "Primitive",
+        "type": "string"
+      },
+      "rotation": {
+        "anyOf": [
+          {
+            "description": "Local Euler rotation in radians (XYZ).",
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 3,
+            "minItems": 3,
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Rotation"
+      },
+      "scale": {
+        "anyOf": [
+          {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 3,
+            "minItems": 3,
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Scale"
+      },
+      "size": {
+        "default": 2.0,
+        "exclusiveMinimum": 0,
+        "title": "Size",
+        "type": "number"
+      }
+    },
+    "title": "create_primitiveArguments",
+    "type": "object"
+  },
+  "delete_action": {
+    "additionalProperties": false,
+    "properties": {
+      "action_name": {
+        "title": "Action Name",
+        "type": "string"
+      },
+      "force": {
+        "default": false,
+        "title": "Force",
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "action_name"
+    ],
+    "title": "delete_actionArguments",
+    "type": "object"
+  },
+  "delete_object": {
+    "additionalProperties": false,
+    "properties": {
+      "name": {
+        "title": "Name",
+        "type": "string"
+      }
+    },
+    "required": [
+      "name"
+    ],
+    "title": "delete_objectArguments",
+    "type": "object"
+  },
+  "duplicate_action": {
+    "additionalProperties": false,
+    "properties": {
+      "action_name": {
+        "title": "Action Name",
+        "type": "string"
+      },
+      "new_name": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "New Name"
+      }
+    },
+    "required": [
+      "action_name"
+    ],
+    "title": "duplicate_actionArguments",
+    "type": "object"
+  },
+  "duplicate_object": {
+    "additionalProperties": false,
+    "properties": {
+      "linked": {
+        "default": false,
+        "title": "Linked",
+        "type": "boolean"
+      },
+      "name": {
+        "title": "Name",
+        "type": "string"
+      },
+      "new_name": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "New Name"
+      }
+    },
+    "required": [
+      "name"
+    ],
+    "title": "duplicate_objectArguments",
+    "type": "object"
+  },
+  "enable_compositor": {
+    "additionalProperties": false,
+    "properties": {
+      "clear_nodes": {
+        "default": false,
+        "title": "Clear Nodes",
+        "type": "boolean"
+      },
+      "use_nodes": {
+        "default": true,
+        "title": "Use Nodes",
+        "type": "boolean"
+      }
+    },
+    "title": "enable_compositorArguments",
+    "type": "object"
+  },
+  "execute_code": {
+    "additionalProperties": false,
+    "properties": {
+      "code": {
+        "title": "Code",
+        "type": "string"
+      }
+    },
+    "required": [
+      "code"
+    ],
+    "title": "execute_blender_codeArguments",
+    "type": "object"
+  },
+  "export_file": {
+    "additionalProperties": false,
+    "properties": {
+      "file_type": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "File Type"
+      },
+      "filepath": {
+        "title": "Filepath",
+        "type": "string"
+      },
+      "use_selection": {
+        "default": false,
+        "title": "Use Selection",
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "filepath"
+    ],
+    "title": "export_fileArguments",
+    "type": "object"
+  },
+  "get_object_info": {
+    "additionalProperties": false,
+    "properties": {
+      "name": {
+        "title": "Name",
+        "type": "string"
+      }
+    },
+    "required": [
+      "name"
+    ],
+    "title": "get_object_infoArguments",
+    "type": "object"
+  },
+  "get_scene_info": {
+    "additionalProperties": false,
+    "properties": {},
+    "title": "get_scene_infoArguments",
+    "type": "object"
+  },
+  "health": {
+    "additionalProperties": false,
+    "properties": {},
+    "title": "get_blender_statusArguments",
+    "type": "object"
+  },
+  "import_file": {
+    "additionalProperties": false,
+    "properties": {
+      "file_type": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "File Type"
+      },
+      "filepath": {
+        "title": "Filepath",
+        "type": "string"
+      }
+    },
+    "required": [
+      "filepath"
+    ],
+    "title": "import_fileArguments",
+    "type": "object"
+  },
+  "insert_keyframe": {
+    "additionalProperties": false,
+    "properties": {
+      "data_path": {
+        "title": "Data Path",
+        "type": "string"
+      },
+      "frame": {
+        "title": "Frame",
+        "type": "integer"
+      },
+      "index": {
+        "default": -1,
+        "title": "Index",
+        "type": "integer"
+      },
+      "name": {
+        "title": "Name",
+        "type": "string"
+      }
+    },
+    "required": [
+      "name",
+      "data_path",
+      "frame"
+    ],
+    "title": "insert_keyframeArguments",
+    "type": "object"
+  },
+  "keyframe_transform": {
+    "additionalProperties": false,
+    "properties": {
+      "frame": {
+        "title": "Frame",
+        "type": "integer"
+      },
+      "location": {
+        "anyOf": [
+          {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 3,
+            "minItems": 3,
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Location"
+      },
+      "name": {
+        "title": "Name",
+        "type": "string"
+      },
+      "rotation": {
+        "anyOf": [
+          {
+            "description": "Local Euler rotation in radians (XYZ).",
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 3,
+            "minItems": 3,
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Rotation"
+      },
+      "scale": {
+        "anyOf": [
+          {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 3,
+            "minItems": 3,
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Scale"
+      }
+    },
+    "required": [
+      "name",
+      "frame"
+    ],
+    "title": "keyframe_transformArguments",
+    "type": "object"
+  },
+  "link_compositor_nodes": {
+    "additionalProperties": false,
+    "properties": {
+      "from_node": {
+        "title": "From Node",
+        "type": "string"
+      },
+      "from_socket": {
+        "title": "From Socket",
+        "type": "string"
+      },
+      "to_node": {
+        "title": "To Node",
+        "type": "string"
+      },
+      "to_socket": {
+        "title": "To Socket",
+        "type": "string"
+      }
+    },
+    "required": [
+      "from_node",
+      "from_socket",
+      "to_node",
+      "to_socket"
+    ],
+    "title": "link_compositor_nodesArguments",
+    "type": "object"
+  },
+  "link_geometry_nodes": {
+    "additionalProperties": false,
+    "properties": {
+      "from_node": {
+        "title": "From Node",
+        "type": "string"
+      },
+      "from_socket": {
+        "title": "From Socket",
+        "type": "string"
+      },
+      "modifier_name": {
+        "default": "GeometryNodes",
+        "title": "Modifier Name",
+        "type": "string"
+      },
+      "object_name": {
+        "title": "Object Name",
+        "type": "string"
+      },
+      "to_node": {
+        "title": "To Node",
+        "type": "string"
+      },
+      "to_socket": {
+        "title": "To Socket",
+        "type": "string"
+      }
+    },
+    "required": [
+      "object_name",
+      "from_node",
+      "from_socket",
+      "to_node",
+      "to_socket"
+    ],
+    "title": "link_geometry_nodesArguments",
+    "type": "object"
+  },
+  "list_actions": {
+    "additionalProperties": false,
+    "properties": {},
+    "title": "list_actionsArguments",
+    "type": "object"
+  },
+  "list_animation_data": {
+    "additionalProperties": false,
+    "properties": {
+      "name": {
+        "title": "Name",
+        "type": "string"
+      }
+    },
+    "required": [
+      "name"
+    ],
+    "title": "list_animation_dataArguments",
+    "type": "object"
+  },
+  "list_collections": {
+    "additionalProperties": false,
+    "properties": {},
+    "title": "list_collectionsArguments",
+    "type": "object"
+  },
+  "list_compositor_nodes": {
+    "additionalProperties": false,
+    "properties": {},
+    "title": "list_compositor_nodesArguments",
+    "type": "object"
+  },
+  "list_constraints": {
+    "additionalProperties": false,
+    "properties": {
+      "object_name": {
+        "title": "Object Name",
+        "type": "string"
+      }
+    },
+    "required": [
+      "object_name"
+    ],
+    "title": "list_constraintsArguments",
+    "type": "object"
+  },
+  "list_geometry_inputs": {
+    "additionalProperties": false,
+    "properties": {
+      "modifier_name": {
+        "default": "GeometryNodes",
+        "title": "Modifier Name",
+        "type": "string"
+      },
+      "object_name": {
+        "title": "Object Name",
+        "type": "string"
+      }
+    },
+    "required": [
+      "object_name"
+    ],
+    "title": "list_geometry_inputsArguments",
+    "type": "object"
+  },
+  "list_geometry_nodes": {
+    "additionalProperties": false,
+    "properties": {
+      "modifier_name": {
+        "default": "GeometryNodes",
+        "title": "Modifier Name",
+        "type": "string"
+      },
+      "object_name": {
+        "title": "Object Name",
+        "type": "string"
+      }
+    },
+    "required": [
+      "object_name"
+    ],
+    "title": "list_geometry_nodesArguments",
+    "type": "object"
+  },
+  "list_modifiers": {
+    "additionalProperties": false,
+    "properties": {
+      "object_name": {
+        "title": "Object Name",
+        "type": "string"
+      }
+    },
+    "required": [
+      "object_name"
+    ],
+    "title": "list_modifiersArguments",
+    "type": "object"
+  },
+  "list_nla_tracks": {
+    "additionalProperties": false,
+    "properties": {
+      "object_name": {
+        "title": "Object Name",
+        "type": "string"
+      }
+    },
+    "required": [
+      "object_name"
+    ],
+    "title": "list_nla_tracksArguments",
+    "type": "object"
+  },
+  "list_objects": {
+    "additionalProperties": false,
+    "properties": {},
+    "title": "list_objectsArguments",
+    "type": "object"
+  },
+  "list_view_layers": {
+    "additionalProperties": false,
+    "properties": {},
+    "title": "list_view_layersArguments",
+    "type": "object"
+  },
+  "new_scene": {
+    "additionalProperties": false,
+    "properties": {
+      "use_empty": {
+        "default": true,
+        "title": "Use Empty",
+        "type": "boolean"
+      }
+    },
+    "title": "new_sceneArguments",
+    "type": "object"
+  },
+  "open_blend": {
+    "additionalProperties": false,
+    "properties": {
+      "filepath": {
+        "title": "Filepath",
+        "type": "string"
+      }
+    },
+    "required": [
+      "filepath"
+    ],
+    "title": "open_blendArguments",
+    "type": "object"
+  },
+  "push_down_action": {
+    "additionalProperties": false,
+    "properties": {
+      "object_name": {
+        "title": "Object Name",
+        "type": "string"
+      }
+    },
+    "required": [
+      "object_name"
+    ],
+    "title": "push_down_actionArguments",
+    "type": "object"
+  },
+  "remove_constraint": {
+    "additionalProperties": false,
+    "properties": {
+      "constraint_name": {
+        "title": "Constraint Name",
+        "type": "string"
+      },
+      "object_name": {
+        "title": "Object Name",
+        "type": "string"
+      }
+    },
+    "required": [
+      "object_name",
+      "constraint_name"
+    ],
+    "title": "remove_constraintArguments",
+    "type": "object"
+  },
+  "remove_modifier": {
+    "additionalProperties": false,
+    "properties": {
+      "modifier_name": {
+        "title": "Modifier Name",
+        "type": "string"
+      },
+      "object_name": {
+        "title": "Object Name",
+        "type": "string"
+      }
+    },
+    "required": [
+      "object_name",
+      "modifier_name"
+    ],
+    "title": "remove_modifierArguments",
+    "type": "object"
+  },
+  "remove_nla_strip": {
+    "additionalProperties": false,
+    "properties": {
+      "object_name": {
+        "title": "Object Name",
+        "type": "string"
+      },
+      "strip_name": {
+        "title": "Strip Name",
+        "type": "string"
+      },
+      "track_name": {
+        "title": "Track Name",
+        "type": "string"
+      }
+    },
+    "required": [
+      "object_name",
+      "track_name",
+      "strip_name"
+    ],
+    "title": "remove_nla_stripArguments",
+    "type": "object"
+  },
+  "remove_object_from_collection": {
+    "additionalProperties": false,
+    "properties": {
+      "collection_name": {
+        "title": "Collection Name",
+        "type": "string"
+      },
+      "object_name": {
+        "title": "Object Name",
+        "type": "string"
+      }
+    },
+    "required": [
+      "object_name",
+      "collection_name"
+    ],
+    "title": "remove_object_from_collectionArguments",
+    "type": "object"
+  },
+  "render_animation": {
+    "additionalProperties": false,
+    "properties": {
+      "engine": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Engine"
+      },
+      "filepath": {
+        "title": "Filepath",
+        "type": "string"
+      },
+      "frame_end": {
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Frame End"
+      },
+      "frame_start": {
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Frame Start"
+      }
+    },
+    "required": [
+      "filepath"
+    ],
+    "title": "render_animationArguments",
+    "type": "object"
+  },
+  "render_still": {
+    "additionalProperties": false,
+    "properties": {
+      "engine": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Engine"
+      },
+      "filepath": {
+        "title": "Filepath",
+        "type": "string"
+      },
+      "resolution_x": {
+        "anyOf": [
+          {
+            "exclusiveMinimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Resolution X"
+      },
+      "resolution_y": {
+        "anyOf": [
+          {
+            "exclusiveMinimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Resolution Y"
+      },
+      "samples": {
+        "anyOf": [
+          {
+            "exclusiveMinimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Samples"
+      }
+    },
+    "required": [
+      "filepath"
+    ],
+    "title": "render_stillArguments",
+    "type": "object"
+  },
+  "save_blend": {
+    "additionalProperties": false,
+    "properties": {
+      "filepath": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Filepath"
+      }
+    },
+    "title": "save_blendArguments",
+    "type": "object"
+  },
+  "set_active_action": {
+    "additionalProperties": false,
+    "properties": {
+      "action_name": {
+        "title": "Action Name",
+        "type": "string"
+      },
+      "object_name": {
+        "title": "Object Name",
+        "type": "string"
+      }
+    },
+    "required": [
+      "object_name",
+      "action_name"
+    ],
+    "title": "set_active_actionArguments",
+    "type": "object"
+  },
+  "set_active_camera": {
+    "additionalProperties": false,
+    "properties": {
+      "name": {
+        "title": "Name",
+        "type": "string"
+      }
+    },
+    "required": [
+      "name"
+    ],
+    "title": "set_active_cameraArguments",
+    "type": "object"
+  },
+  "set_active_view_layer": {
+    "additionalProperties": false,
+    "properties": {
+      "name": {
+        "title": "Name",
+        "type": "string"
+      }
+    },
+    "required": [
+      "name"
+    ],
+    "title": "set_active_view_layerArguments",
+    "type": "object"
+  },
+  "set_collection_visibility": {
+    "additionalProperties": false,
+    "properties": {
+      "collection_name": {
+        "title": "Collection Name",
+        "type": "string"
+      },
+      "exclude": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Exclude"
+      },
+      "hide_render": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Hide Render"
+      },
+      "hide_viewport": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Hide Viewport"
+      },
+      "holdout": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Holdout"
+      },
+      "indirect_only": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Indirect Only"
+      },
+      "view_layer_name": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "View Layer Name"
+      }
+    },
+    "required": [
+      "collection_name"
+    ],
+    "title": "set_collection_visibilityArguments",
+    "type": "object"
+  },
+  "set_geometry_input": {
+    "additionalProperties": false,
+    "properties": {
+      "attribute_name": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Attribute Name"
+      },
+      "input_name_or_identifier": {
+        "title": "Input Name Or Identifier",
+        "type": "string"
+      },
+      "modifier_name": {
+        "default": "GeometryNodes",
+        "title": "Modifier Name",
+        "type": "string"
+      },
+      "object_name": {
+        "title": "Object Name",
+        "type": "string"
+      },
+      "use_attribute": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Use Attribute"
+      },
+      "value": {
+        "anyOf": [
+          {},
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Value"
+      }
+    },
+    "required": [
+      "object_name",
+      "input_name_or_identifier"
+    ],
+    "title": "set_geometry_inputArguments",
+    "type": "object"
+  },
+  "set_nla_strip": {
+    "additionalProperties": false,
+    "properties": {
+      "action_frame_end": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Action Frame End"
+      },
+      "action_frame_start": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Action Frame Start"
+      },
+      "frame_end": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Frame End"
+      },
+      "frame_start": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Frame Start"
+      },
+      "mute": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Mute"
+      },
+      "object_name": {
+        "title": "Object Name",
+        "type": "string"
+      },
+      "repeat": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Repeat"
+      },
+      "scale": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Scale"
+      },
+      "strip_name": {
+        "title": "Strip Name",
+        "type": "string"
+      },
+      "track_name": {
+        "title": "Track Name",
+        "type": "string"
+      }
+    },
+    "required": [
+      "object_name",
+      "track_name",
+      "strip_name"
+    ],
+    "title": "set_nla_stripArguments",
+    "type": "object"
+  },
+  "set_object_transform": {
+    "additionalProperties": false,
+    "properties": {
+      "location": {
+        "anyOf": [
+          {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 3,
+            "minItems": 3,
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Location"
+      },
+      "name": {
+        "title": "Name",
+        "type": "string"
+      },
+      "rotation": {
+        "anyOf": [
+          {
+            "description": "Local Euler rotation in radians (XYZ).",
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 3,
+            "minItems": 3,
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Rotation"
+      },
+      "scale": {
+        "anyOf": [
+          {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 3,
+            "minItems": 3,
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Scale"
+      }
+    },
+    "required": [
+      "name"
+    ],
+    "title": "set_object_transformArguments",
+    "type": "object"
+  },
+  "set_timeline": {
+    "additionalProperties": false,
+    "properties": {
+      "fps": {
+        "anyOf": [
+          {
+            "exclusiveMinimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Fps"
+      },
+      "frame_current": {
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Frame Current"
+      },
+      "frame_end": {
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Frame End"
+      },
+      "frame_start": {
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Frame Start"
+      }
+    },
+    "title": "set_timelineArguments",
+    "type": "object"
+  },
+  "set_view_layer_passes": {
+    "additionalProperties": false,
+    "properties": {
+      "use_pass_ambient_occlusion": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Use Pass Ambient Occlusion"
+      },
+      "use_pass_diffuse_color": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Use Pass Diffuse Color"
+      },
+      "use_pass_emit": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Use Pass Emit"
+      },
+      "use_pass_glossy_color": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Use Pass Glossy Color"
+      },
+      "use_pass_normal": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Use Pass Normal"
+      },
+      "use_pass_vector": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Use Pass Vector"
+      },
+      "use_pass_z": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Use Pass Z"
+      },
+      "view_layer_name": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "View Layer Name"
+      }
+    },
+    "title": "set_view_layer_passesArguments",
+    "type": "object"
+  },
+  "set_viewport_view": {
+    "additionalProperties": false,
+    "properties": {
+      "distance": {
+        "anyOf": [
+          {
+            "exclusiveMinimum": 0,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Distance"
+      },
+      "lens": {
+        "anyOf": [
+          {
+            "exclusiveMinimum": 0,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Lens"
+      },
+      "location": {
+        "anyOf": [
+          {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 3,
+            "minItems": 3,
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Location"
+      },
+      "rotation_quaternion": {
+        "anyOf": [
+          {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 4,
+            "minItems": 4,
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Rotation Quaternion"
+      },
+      "shading_type": {
+        "anyOf": [
+          {
+            "enum": [
+              "WIREFRAME",
+              "SOLID",
+              "MATERIAL",
+              "RENDERED"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Shading Type"
+      },
+      "view": {
+        "anyOf": [
+          {
+            "enum": [
+              "FRONT",
+              "BACK",
+              "LEFT",
+              "RIGHT",
+              "TOP",
+              "BOTTOM",
+              "CAMERA",
+              "PERSP",
+              "ORTHO"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "View"
+      }
+    },
+    "title": "set_viewport_viewArguments",
+    "type": "object"
+  },
+  "workflow_create_turntable": {
+    "additionalProperties": false,
+    "properties": {
+      "axis": {
+        "default": "Z",
+        "enum": [
+          "X",
+          "Y",
+          "Z"
+        ],
+        "title": "Axis",
+        "type": "string"
+      },
+      "frame_end": {
+        "default": 120,
+        "title": "Frame End",
+        "type": "integer"
+      },
+      "frame_start": {
+        "default": 1,
+        "title": "Frame Start",
+        "type": "integer"
+      },
+      "object_name": {
+        "title": "Object Name",
+        "type": "string"
+      },
+      "rotations": {
+        "default": 1.0,
+        "title": "Rotations",
+        "type": "number"
+      }
+    },
+    "required": [
+      "object_name"
+    ],
+    "title": "workflow_create_turntableArguments",
+    "type": "object"
+  },
+  "workflow_setup_studio": {
+    "additionalProperties": false,
+    "properties": {
+      "add_ground": {
+        "default": true,
+        "title": "Add Ground",
+        "type": "boolean"
+      },
+      "camera_distance": {
+        "default": 6.0,
+        "exclusiveMinimum": 0,
+        "title": "Camera Distance",
+        "type": "number"
+      },
+      "camera_height": {
+        "default": 3.0,
+        "title": "Camera Height",
+        "type": "number"
+      },
+      "camera_name": {
+        "default": "WorkflowCamera",
+        "title": "Camera Name",
+        "type": "string"
+      },
+      "fill_energy": {
+        "default": 600.0,
+        "minimum": 0,
+        "title": "Fill Energy",
+        "type": "number"
+      },
+      "key_energy": {
+        "default": 1200.0,
+        "minimum": 0,
+        "title": "Key Energy",
+        "type": "number"
+      },
+      "object_name": {
+        "default": "Subject",
+        "title": "Object Name",
+        "type": "string"
+      },
+      "primitive": {
+        "default": "CUBE",
+        "enum": [
+          "CUBE",
+          "UV_SPHERE",
+          "ICO_SPHERE",
+          "CYLINDER",
+          "CONE",
+          "PLANE",
+          "TORUS",
+          "MONKEY"
+        ],
+        "title": "Primitive",
+        "type": "string"
+      },
+      "rim_energy": {
+        "default": 900.0,
+        "minimum": 0,
+        "title": "Rim Energy",
+        "type": "number"
+      },
+      "size": {
+        "default": 2.0,
+        "exclusiveMinimum": 0,
+        "title": "Size",
+        "type": "number"
+      }
+    },
+    "title": "workflow_setup_studioArguments",
+    "type": "object"
+  },
+  "workflow_turntable_render": {
+    "additionalProperties": false,
+    "properties": {
+      "add_ground": {
+        "default": true,
+        "title": "Add Ground",
+        "type": "boolean"
+      },
+      "axis": {
+        "default": "Z",
+        "enum": [
+          "X",
+          "Y",
+          "Z"
+        ],
+        "title": "Axis",
+        "type": "string"
+      },
+      "engine": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Engine"
+      },
+      "frame_end": {
+        "default": 120,
+        "title": "Frame End",
+        "type": "integer"
+      },
+      "frame_start": {
+        "default": 1,
+        "title": "Frame Start",
+        "type": "integer"
+      },
+      "object_name": {
+        "default": "Subject",
+        "title": "Object Name",
+        "type": "string"
+      },
+      "output_path": {
+        "title": "Output Path",
+        "type": "string"
+      },
+      "primitive": {
+        "default": "CUBE",
+        "enum": [
+          "CUBE",
+          "UV_SPHERE",
+          "ICO_SPHERE",
+          "CYLINDER",
+          "CONE",
+          "PLANE",
+          "TORUS",
+          "MONKEY"
+        ],
+        "title": "Primitive",
+        "type": "string"
+      },
+      "resolution_x": {
+        "default": 512,
+        "exclusiveMinimum": 0,
+        "title": "Resolution X",
+        "type": "integer"
+      },
+      "resolution_y": {
+        "default": 512,
+        "exclusiveMinimum": 0,
+        "title": "Resolution Y",
+        "type": "integer"
+      },
+      "rotations": {
+        "default": 1.0,
+        "title": "Rotations",
+        "type": "number"
+      },
+      "samples": {
+        "anyOf": [
+          {
+            "exclusiveMinimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Samples"
+      },
+      "setup_studio": {
+        "default": true,
+        "title": "Setup Studio",
+        "type": "boolean"
+      },
+      "size": {
+        "default": 2.0,
+        "exclusiveMinimum": 0,
+        "title": "Size",
+        "type": "number"
+      }
+    },
+    "required": [
+      "output_path"
+    ],
+    "title": "workflow_turntable_renderArguments",
+    "type": "object"
+  }
+}

@@ -19,6 +19,8 @@ from typing import Any
 import bpy
 from mathutils import Quaternion, Vector
 
+from .validation import validate_command
+
 bl_info = {
     "name": "Better Blender Bridge",
     "author": "Better Blender Contributors",
@@ -552,7 +554,49 @@ def _find_view3d_context() -> (
     return None
 
 
+def _require_material(name: str) -> bpy.types.Material:
+    material = bpy.data.materials.get(name)
+    if material is None:
+        raise ValueError(f"Material not found: {name}")
+    return material
+
+
+def _preflight(method: str, params: dict[str, Any]) -> None:
+    validate_command(method, params)
+    # Resolve references before any data-blocks or properties are changed.
+    for key in ("target_name", "parent_name", "view_layer_name", "material_name", "action_name"):
+        value = params.get(key)
+        if value is None:
+            continue
+        resolver = {
+            "target_name": _require_object, "parent_name": _require_collection,
+            "view_layer_name": _require_view_layer,
+            "material_name": _require_material, "action_name": _require_action,
+        }[key]
+        resolver(value)
+    if params.get("object_name") is not None and method not in {
+        "workflow_setup_studio", "workflow_turntable_render",
+    }:
+        _require_object(params["object_name"])
+    if "frame_start" in params or "frame_end" in params:
+        start = params.get("frame_start", bpy.context.scene.frame_start)
+        end = params.get("frame_end", bpy.context.scene.frame_end)
+        if start > end:
+            raise ValueError("frame_start must not exceed frame_end")
+    if method in {"workflow_setup_studio", "workflow_turntable_render"}:
+        _require_object_mode()
+    if "engine" in params:
+        # Engine enum items are dynamic and can be empty through RNA introspection.
+        render = bpy.context.scene.render
+        previous = render.engine
+        try:
+            render.engine = params["engine"]
+        finally:
+            render.engine = previous
+
+
 def _dispatch_command(method: str, params: dict[str, Any]) -> dict[str, Any]:
+    _preflight(method, params)
     if method == "health":
         return {
             "bridge_running": True,
@@ -1327,10 +1371,17 @@ def _dispatch_command(method: str, params: dict[str, Any]) -> dict[str, Any]:
         modifier = obj.modifiers.new(name=modifier_name, type=modifier_type.upper())
 
         settings = params.get("settings")
-        if isinstance(settings, dict):
-            for key, value in settings.items():
-                if hasattr(modifier, key):
+        try:
+            if isinstance(settings, dict):
+                for key in settings:
+                    prop = modifier.bl_rna.properties.get(key)
+                    if prop is None or prop.is_readonly:
+                        raise ValueError(f"Unknown or read-only modifier setting: {key}")
+                for key, value in settings.items():
                     setattr(modifier, key, value)
+        except Exception:
+            obj.modifiers.remove(modifier)
+            raise
 
         return {
             "object_name": obj.name,
@@ -2140,16 +2191,16 @@ def _dispatch_command(method: str, params: dict[str, Any]) -> dict[str, Any]:
         holdout = params.get("holdout")
         indirect_only = params.get("indirect_only")
 
-        if isinstance(hide_viewport, bool):
-            collection.hide_viewport = hide_viewport
-        if isinstance(hide_render, bool):
-            collection.hide_render = hide_render
-
         layer_collection = _find_layer_collection(view_layer.layer_collection, collection.name)
         if layer_collection is None:
             raise ValueError(
                 f"Collection {collection.name} is not present in view layer {view_layer.name}"
             )
+
+        if isinstance(hide_viewport, bool):
+            collection.hide_viewport = hide_viewport
+        if isinstance(hide_render, bool):
+            collection.hide_render = hide_render
 
         if isinstance(exclude, bool):
             layer_collection.exclude = exclude
