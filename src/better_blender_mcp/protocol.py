@@ -14,14 +14,18 @@ class BridgeRequest:
     method: str
     params: dict[str, Any]
     token: str
+    timeout_seconds: float | None = None
 
     def to_json(self) -> dict[str, Any]:
-        return {
+        payload: dict[str, Any] = {
             "id": self.request_id,
             "method": self.method,
             "params": self.params,
             "token": self.token,
         }
+        if self.timeout_seconds is not None:
+            payload["timeout_seconds"] = self.timeout_seconds
+        return payload
 
 
 @dataclass(frozen=True)

@@ -362,3 +362,64 @@ assert len(obj.data.vertices) == 8
          "--python-expr", code], capture_output=True, text=True, timeout=30,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_expired_commands_never_execute_and_running_timeout_is_explicit() -> None:
+    blender = _find_blender_executable()
+    if blender is None:
+        pytest.skip("Blender executable not available")
+    addon_parent = Path(__file__).resolve().parents[2] / "blender_addon"
+    code = f"import sys; sys.path.insert(0, {str(addon_parent)!r})\n" + r"""
+import json
+import socket
+import threading
+import time
+import bpy
+import better_blender_bridge as bridge
+bridge.start_bridge_with_config('127.0.0.1', 0, 'test', register_timer=False)
+runtime = bridge._RUNTIME
+port = runtime.server.server_address[1]
+def request(method, params):
+    with socket.create_connection(('127.0.0.1', port), timeout=2) as sock:
+        sock.sendall((json.dumps({
+            'id': method, 'method': method, 'params': params,
+            'token': 'test', 'timeout_seconds': 0.05,
+        }) + '\n').encode())
+        with sock.makefile('rb') as stream:
+            return json.loads(stream.readline())
+try:
+    response = request('create_collection', {'name': 'MustNotExist'})
+    assert response['code'] == 'EXPIRED', response
+    bridge._drain_command_queue()
+    assert bpy.data.collections.get('MustNotExist') is None
+
+    original = bridge._dispatch_command
+    execution_threads = []
+    def slow_dispatch(method, params):
+        execution_threads.append(threading.get_ident())
+        time.sleep(0.15)
+        return original(method, params)
+    bridge._dispatch_command = slow_dispatch
+    responses = []
+    worker = threading.Thread(target=lambda: responses.append(
+        request('create_collection', {'name': 'RunningOperation'})
+    ))
+    worker.start()
+    deadline = time.monotonic() + 2
+    while runtime.command_queue.empty():
+        assert time.monotonic() < deadline
+        time.sleep(0.001)
+    bridge._drain_command_queue()
+    worker.join(timeout=2)
+    assert not worker.is_alive()
+    assert responses[0]['code'] == 'OUTCOME_UNKNOWN', responses
+    assert bpy.data.collections.get('RunningOperation') is not None
+    assert execution_threads == [threading.get_ident()]
+finally:
+    bridge.stop_bridge()
+"""
+    result = subprocess.run(
+        [blender, "--background", "--factory-startup", "--python-exit-code", "1",
+         "--python-expr", code], capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr

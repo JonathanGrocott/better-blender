@@ -12,7 +12,7 @@ import queue
 import socketserver
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +36,9 @@ class BridgeCommand:
     method: str
     params: dict[str, Any]
     result_queue: queue.Queue[dict[str, Any]]
+    deadline: float
+    state: str = "queued"
+    lock: threading.Lock = field(default_factory=threading.Lock)
 
 
 @dataclass
@@ -99,12 +102,23 @@ class _BridgeRequestHandler(socketserver.StreamRequestHandler):
             self._write({"id": request_id, "ok": False, "error": "params must be an object"})
             return
 
+        timeout = payload.get("timeout_seconds", runtime.timeout_seconds)
+        if (
+            isinstance(timeout, bool)
+            or not isinstance(timeout, (int, float))
+            or not math.isfinite(timeout)
+            or timeout <= 0
+        ):
+            self._write({"id": request_id, "ok": False, "error": "Invalid timeout_seconds"})
+            return
+        timeout = min(timeout, runtime.timeout_seconds)
         result_queue: queue.Queue[dict[str, Any]] = queue.Queue(maxsize=1)
         command = BridgeCommand(
             request_id=request_id,
             method=method,
             params=params,
             result_queue=result_queue,
+            deadline=time.monotonic() + timeout,
         )
 
         if runtime.command_queue is None:
@@ -114,10 +128,27 @@ class _BridgeRequestHandler(socketserver.StreamRequestHandler):
         runtime.command_queue.put(command)
 
         try:
-            response = result_queue.get(timeout=runtime.timeout_seconds)
+            response = result_queue.get(timeout=max(0, command.deadline - time.monotonic()))
         except queue.Empty:
-            self._write({"id": request_id, "ok": False, "error": "Request timed out"})
-            return
+            # Serialize timeout and execution transitions so an expired queued command
+            # can never begin execution after this response is sent.
+            with command.lock:
+                if command.state == "completed":
+                    response = result_queue.get_nowait()
+                else:
+                    if command.state == "queued":
+                        command.state = "expired"
+                    running = command.state == "running"
+                    response = {
+                        "id": request_id,
+                        "ok": False,
+                        "error": (
+                            "Request timed out while executing; outcome unknown. "
+                            "The operation may still complete. Do not retry automatically."
+                            if running else "Request expired before execution; no changes made."
+                        ),
+                        "code": "OUTCOME_UNKNOWN" if running else "EXPIRED",
+                    }
 
         self._write(response)
 
@@ -2250,14 +2281,27 @@ def _drain_command_queue() -> float | None:
         except queue.Empty:
             break
 
+        drained += 1
+        with command.lock:
+            if command.state == "expired" or time.monotonic() >= command.deadline:
+                command.state = "expired"
+                command.result_queue.put_nowait({
+                    "id": command.request_id, "ok": False,
+                    "error": "Request expired before execution; no changes made.",
+                    "code": "EXPIRED",
+                })
+                continue
+            command.state = "running"
+
         try:
             result = _dispatch_command(command.method, command.params)
             response = {"id": command.request_id, "ok": True, "result": result}
         except Exception as exc:  # pylint: disable=broad-except
             response = {"id": command.request_id, "ok": False, "error": str(exc)}
 
-        command.result_queue.put(response)
-        drained += 1
+        with command.lock:
+            command.result_queue.put_nowait(response)
+            command.state = "completed"
 
     return 0.05
 

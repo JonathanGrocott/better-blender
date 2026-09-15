@@ -36,11 +36,12 @@ class BlenderBridgeClient:
             method=method,
             params=params or {},
             token=self.config.token,
+            timeout_seconds=self.config.timeout_seconds,
         )
 
         endpoint = (self.config.host, self.config.port)
         with socket.create_connection(endpoint, timeout=self.config.timeout_seconds) as conn:
-            conn.settimeout(self.config.timeout_seconds)
+            conn.settimeout(self.config.timeout_seconds + 1.0)
             raw_request = json.dumps(request.to_json()).encode("utf-8") + b"\n"
             conn.sendall(raw_request)
 

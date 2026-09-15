@@ -28,3 +28,10 @@ def test_bridge_response_from_json_success():
 def test_bridge_response_invalid_payload():
     with pytest.raises(ValueError):
         BridgeResponse.from_json({"ok": True})
+
+
+def test_bridge_request_includes_optional_execution_budget():
+    req = BridgeRequest(
+        request_id="abc", method="health", params={}, token="secret", timeout_seconds=0.5,
+    )
+    assert req.to_json()["timeout_seconds"] == 0.5

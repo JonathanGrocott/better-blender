@@ -49,6 +49,14 @@ Failure:
 - Request handlers only parse/validate and enqueue commands.
 - Blender API work executes on main thread via timer callback (`bpy.app.timers`).
 - Default bridge timeout is 30 seconds per request.
+- Requests may include positive `timeout_seconds`; the smaller of this budget and the
+  bridge timeout applies. The MCP client forwards its configured timeout and allows
+  an additional second for the timeout response to arrive.
+- Queued commands that expire are skipped without changing Blender state (`code: EXPIRED`).
+- Commands already executing cannot be rolled back by a socket timeout. Their response
+  uses `code: OUTCOME_UNKNOWN` and warns against automatic retries. Inspect scene/output
+  state before deciding whether to retry. Rendering still executes synchronously in Blender.
+- MCP socket waits run off the event loop; Blender API work remains on its main thread.
 
 ## Implemented Methods (v0.2)
 - `health`
@@ -124,7 +132,8 @@ Failure:
 - `Invalid request envelope`: missing/invalid `id` or `method`.
 - `params must be an object`: params not JSON object.
 - `Unsupported method: <method>`: unknown command.
-- `Request timed out`: command did not complete before timeout.
+- `EXPIRED`: deadline elapsed before execution; no changes made.
+- `OUTCOME_UNKNOWN`: deadline elapsed during execution; the operation may still complete.
 
 ## Compatibility Policy
 - Major versions can introduce breaking envelope or method changes.
