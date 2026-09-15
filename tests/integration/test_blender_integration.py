@@ -80,6 +80,7 @@ def bridge_client(tmp_path: Path):
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
+        env={**os.environ, "BETTER_BLENDER_STATE_DIR": str(tmp_path / "state")},
     )
 
     try:
@@ -707,3 +708,39 @@ finally:
         timeout=15,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_checkpoint_restores_scene_after_partial_work(bridge_client: BlenderBridgeClient):
+    from better_blender_mcp.bridge_client import BridgeError
+
+    bridge_client.call("new_scene", {"use_empty": True})
+    bridge_client.call("create_primitive", {"name": "Recoverable"})
+    original_path = bridge_client.call("get_scene_info")["file_path"]
+    saved = bridge_client.call("create_checkpoint", {"label": "Before edits"})
+    assert bridge_client.call("get_scene_info")["file_path"] == original_path
+    bridge_client.call("set_object_transform", {"name": "Recoverable", "location": [3, 2, 1]})
+    with pytest.raises(BridgeError):
+        bridge_client.call(
+            "add_modifier",
+            {
+                "object_name": "Recoverable",
+                "modifier_type": "INVALID",
+            },
+        )
+    restored = bridge_client.call("restore_checkpoint", {"checkpoint_id": saved["checkpoint_id"]})
+    assert restored["recovery_checkpoint"]
+    assert restored["filepath"] != saved["filepath"]
+    assert bridge_client.call("get_object_info", {"name": "Recoverable"})["object"]["location"] == [
+        0,
+        0,
+        0,
+    ]
+    deleted = bridge_client.call(
+        "run_with_checkpoint",
+        {
+            "method": "delete_object",
+            "params": {"name": "Recoverable"},
+        },
+    )
+    assert deleted["result"]["deleted"] == "Recoverable"
+    assert bridge_client.call("list_checkpoints")["total"] == 3

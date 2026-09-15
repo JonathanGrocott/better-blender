@@ -1042,6 +1042,60 @@ def create_server(client: BlenderBridgeClient) -> Any:
         """Stop an isolated render worker. Already-written output files are retained."""
         return await client.acall("cancel_job", {"job_id": job_id})
 
+    @server.tool(name="create_checkpoint")
+    async def create_checkpoint(label: str = "Checkpoint") -> dict[str, Any]:
+        """Save an immutable whole-file recovery snapshot without changing the current file path."""
+        return await client.acall("create_checkpoint", {"label": label})
+
+    @server.tool(name="list_checkpoints")
+    async def list_checkpoints(
+        offset: Annotated[int, Field(ge=0)] = 0,
+        limit: Annotated[int, Field(ge=1, le=100)] = 50,
+    ) -> dict[str, Any]:
+        """List stored recovery snapshots, newest first."""
+        return await client.acall("list_checkpoints", {"offset": offset, "limit": limit})
+
+    @server.tool(name="restore_checkpoint")
+    async def restore_checkpoint(
+        checkpoint_id: str,
+        backup_current: bool = True,
+    ) -> dict[str, Any]:
+        """Restore a snapshot into a working copy. Save it to your desired path afterward.
+
+        By default, checkpoint the current document first so this restore is recoverable.
+        """
+        return await client.acall(
+            "restore_checkpoint",
+            {
+                "checkpoint_id": checkpoint_id,
+                "backup_current": backup_current,
+            },
+        )
+
+    @server.tool(name="run_with_checkpoint")
+    async def run_with_checkpoint(
+        method: Literal[
+            "new_scene",
+            "open_blend",
+            "delete_object",
+            "clear_animation_data",
+            "delete_action",
+            "workflow_setup_studio",
+            "workflow_create_turntable",
+        ],
+        params: dict[str, Any],
+        label: str = "Before destructive operation",
+    ) -> dict[str, Any]:
+        """Create a recovery checkpoint before an operation; errors include its checkpoint ID."""
+        return await client.acall(
+            "run_with_checkpoint",
+            {
+                "method": method,
+                "params": params,
+                "label": label,
+            },
+        )
+
     return server
 
 

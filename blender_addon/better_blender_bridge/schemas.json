@@ -543,6 +543,18 @@
     "title": "create_cameraArguments",
     "type": "object"
   },
+  "create_checkpoint": {
+    "additionalProperties": false,
+    "properties": {
+      "label": {
+        "default": "Checkpoint",
+        "title": "Label",
+        "type": "string"
+      }
+    },
+    "title": "create_checkpointArguments",
+    "type": "object"
+  },
   "create_collection": {
     "additionalProperties": false,
     "properties": {
@@ -1257,6 +1269,26 @@
     "title": "list_animation_dataArguments",
     "type": "object"
   },
+  "list_checkpoints": {
+    "additionalProperties": false,
+    "properties": {
+      "limit": {
+        "default": 50,
+        "maximum": 100,
+        "minimum": 1,
+        "title": "Limit",
+        "type": "integer"
+      },
+      "offset": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Offset",
+        "type": "integer"
+      }
+    },
+    "title": "list_checkpointsArguments",
+    "type": "object"
+  },
   "list_collections": {
     "additionalProperties": false,
     "properties": {},
@@ -1595,6 +1627,59 @@
       "filepath"
     ],
     "title": "render_stillArguments",
+    "type": "object"
+  },
+  "restore_checkpoint": {
+    "additionalProperties": false,
+    "properties": {
+      "backup_current": {
+        "default": true,
+        "title": "Backup Current",
+        "type": "boolean"
+      },
+      "checkpoint_id": {
+        "title": "Checkpoint Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "checkpoint_id"
+    ],
+    "title": "restore_checkpointArguments",
+    "type": "object"
+  },
+  "run_with_checkpoint": {
+    "additionalProperties": false,
+    "properties": {
+      "label": {
+        "default": "Before destructive operation",
+        "title": "Label",
+        "type": "string"
+      },
+      "method": {
+        "enum": [
+          "new_scene",
+          "open_blend",
+          "delete_object",
+          "clear_animation_data",
+          "delete_action",
+          "workflow_setup_studio",
+          "workflow_create_turntable"
+        ],
+        "title": "Method",
+        "type": "string"
+      },
+      "params": {
+        "additionalProperties": true,
+        "title": "Params",
+        "type": "object"
+      }
+    },
+    "required": [
+      "method",
+      "params"
+    ],
+    "title": "run_with_checkpointArguments",
     "type": "object"
   },
   "save_blend": {

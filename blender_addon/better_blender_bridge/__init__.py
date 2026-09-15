@@ -22,6 +22,7 @@ from typing import Any
 import bpy
 from mathutils import Quaternion, Vector
 
+from . import checkpoints
 from .jobs import RenderJobs
 from .validation import validate_command
 
@@ -754,6 +755,26 @@ def _preflight(method: str, params: dict[str, Any]) -> None:
 
 
 def _dispatch_command(method: str, params: dict[str, Any]) -> dict[str, Any]:
+    if method in {
+        "create_checkpoint",
+        "list_checkpoints",
+        "restore_checkpoint",
+        "run_with_checkpoint",
+    }:
+        validate_command(method, params)
+        if method == "create_checkpoint":
+            return checkpoints.create(params.get("label", "Checkpoint"))
+        if method == "list_checkpoints":
+            return checkpoints.list_checkpoints(params.get("offset", 0), params.get("limit", 50))
+        if method == "restore_checkpoint":
+            return checkpoints.restore(params["checkpoint_id"], params.get("backup_current", True))
+        _preflight(params["method"], params["params"])
+        saved = checkpoints.create(params.get("label", "Before destructive operation"))
+        try:
+            result = _dispatch_command(params["method"], params["params"])
+        except Exception as exc:
+            raise RuntimeError(f"{exc}. Recovery checkpoint: {saved['checkpoint_id']}") from exc
+        return {"result": result, "recovery_checkpoint": saved}
     if method == "start_render_job":
         validate_command(method, params)
         render_method = params["method"]
@@ -2400,6 +2421,10 @@ def _dispatch_command(method: str, params: dict[str, Any]) -> dict[str, Any]:
 
 def _supported_methods() -> list[str]:
     return [
+        "create_checkpoint",
+        "list_checkpoints",
+        "restore_checkpoint",
+        "run_with_checkpoint",
         "start_render_job",
         "get_job_status",
         "cancel_job",
