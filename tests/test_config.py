@@ -1,7 +1,8 @@
 from better_blender_mcp.config import load_config_from_env
 
 
-def test_load_config_defaults(monkeypatch):
+def test_load_config_defaults(monkeypatch, tmp_path):
+    monkeypatch.setenv("BETTER_BLENDER_STATE_DIR", str(tmp_path))
     monkeypatch.delenv("BETTER_BLENDER_HOST", raising=False)
     monkeypatch.delenv("BETTER_BLENDER_PORT", raising=False)
     monkeypatch.delenv("BETTER_BLENDER_TOKEN", raising=False)
@@ -11,7 +12,7 @@ def test_load_config_defaults(monkeypatch):
 
     assert cfg.bridge.host == "127.0.0.1"
     assert cfg.bridge.port == 8765
-    assert cfg.bridge.token == "change-me"
+    assert cfg.bridge.token == ""
     assert cfg.bridge.timeout_seconds == 30.0
 
 

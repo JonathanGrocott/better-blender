@@ -984,6 +984,38 @@
     "title": "execute_blender_codeArguments",
     "type": "object"
   },
+  "execute_request": {
+    "additionalProperties": false,
+    "properties": {
+      "expected_document_id": {
+        "title": "Expected Document Id",
+        "type": "string"
+      },
+      "method": {
+        "title": "Method",
+        "type": "string"
+      },
+      "params": {
+        "additionalProperties": true,
+        "title": "Params",
+        "type": "object"
+      },
+      "request_id": {
+        "maxLength": 128,
+        "minLength": 1,
+        "title": "Request Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "request_id",
+      "expected_document_id",
+      "method",
+      "params"
+    ],
+    "title": "execute_requestArguments",
+    "type": "object"
+  },
   "export_file": {
     "additionalProperties": false,
     "properties": {
@@ -1013,6 +1045,12 @@
       "filepath"
     ],
     "title": "export_fileArguments",
+    "type": "object"
+  },
+  "get_document_context": {
+    "additionalProperties": false,
+    "properties": {},
+    "title": "get_document_contextArguments",
     "type": "object"
   },
   "get_job_image": {
@@ -1119,6 +1157,20 @@
       "name"
     ],
     "title": "get_object_infoArguments",
+    "type": "object"
+  },
+  "get_request_status": {
+    "additionalProperties": false,
+    "properties": {
+      "request_id": {
+        "title": "Request Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "request_id"
+    ],
+    "title": "get_request_statusArguments",
     "type": "object"
   },
   "get_scene_info": {

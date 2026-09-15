@@ -415,7 +415,7 @@ port = runtime.server.server_address[1]
 def request(method, params):
     with socket.create_connection(('127.0.0.1', port), timeout=2) as sock:
         sock.sendall((json.dumps({
-            'id': method, 'method': method, 'params': params,
+            'id': method + str(time.monotonic()), 'method': method, 'params': params,
             'token': 'test', 'timeout_seconds': 0.05,
         }) + '\n').encode())
         with sock.makefile('rb') as stream:
@@ -774,3 +774,109 @@ def test_scene_and_node_inspection(bridge_client: BlenderBridgeClient):
     )
     assert any(socket["name"] == "Geometry" for socket in node["outputs"])
     assert any(prop["name"] == "label" for prop in node["properties"])
+
+
+def test_document_guard_and_idempotent_edits(bridge_client):
+    from better_blender_mcp.bridge_client import BridgeError
+
+    context = bridge_client.call("get_document_context")
+    params = {
+        "request_id": "stable-create-id",
+        "expected_document_id": context["document_id"],
+        "method": "create_collection",
+        "params": {"name": "OnlyOnce"},
+    }
+    first = bridge_client.call("execute_request", params)
+    assert bridge_client.call("execute_request", params) == first
+    status = bridge_client.call("get_request_status", {"request_id": "stable-create-id"})
+    assert status["state"] == "completed"
+    bridge_client.call("new_scene", {"use_empty": True})
+    with pytest.raises(BridgeError, match="changed"):
+        bridge_client.call("execute_request", {**params, "request_id": "stale-document"})
+    # A completed retry remains a replay even after a document switch.
+    assert bridge_client.call("execute_request", params) == first
+    names = [item["name"] for item in bridge_client.call("list_collections")["collections"]]
+    assert "OnlyOnce" not in names
+
+
+def test_access_controls_and_shutdown_release_queued_calls(tmp_path):
+    blender = _find_blender_executable()
+    if blender is None:
+        pytest.skip("Blender executable not available")
+    addon_parent = Path(__file__).resolve().parents[2] / "blender_addon"
+    code = (
+        f"import sys; sys.path.insert(0, {str(addon_parent)!r})\n"
+        + r"""
+import json, socket, threading, time
+from pathlib import Path
+import bpy
+import better_blender_bridge as bridge
+try:
+    bridge.start_bridge_with_config('0.0.0.0', 0, 'test', register_timer=False)
+    raise AssertionError('Nonlocal binding accepted')
+except ValueError as exc:
+    assert 'opt-in' in str(exc)
+root = Path(__import__('os').environ['BETTER_BLENDER_STATE_DIR'])
+root.mkdir(parents=True, exist_ok=True)
+bridge.start_bridge_with_config('127.0.0.1', 0, 'test', read_only=True,
+    allowed_roots=(str(root),), register_timer=False)
+try:
+    bridge._dispatch_command('get_scene_info', {})
+    try:
+        bridge._dispatch_command('create_collection', {'name': 'Forbidden'})
+        raise AssertionError('Read-only mutation accepted')
+    except ValueError as exc:
+        assert 'read-only' in str(exc)
+    assert bpy.data.collections.get('Forbidden') is None
+    bridge._RUNTIME.read_only = False
+    for path in [root / '..' / 'escape.blend']:
+        try:
+            bridge._dispatch_command('save_blend', {'filepath': str(path)})
+            raise AssertionError('Path escape accepted')
+        except ValueError as exc:
+            assert 'outside' in str(exc)
+    link = root / 'link'
+    link.symlink_to(root.parent, target_is_directory=True)
+    try:
+        bridge._normalize_path(str(link / 'escape.blend'), require_exists=False)
+        raise AssertionError('Symlink escape accepted')
+    except ValueError:
+        pass
+    runtime = bridge._RUNTIME
+    responses = []
+    def request():
+        with socket.create_connection(('127.0.0.1', runtime.server.server_address[1])) as sock:
+            sock.sendall((json.dumps({'id': 'shutdown', 'method': 'create_collection',
+                'params': {'name': 'Never'}, 'token': 'test'}) + '\n').encode())
+            responses.append(json.loads(sock.makefile('rb').readline()))
+    worker = threading.Thread(target=request)
+    worker.start()
+    deadline = time.monotonic() + 3
+    while runtime.command_queue.empty():
+        assert time.monotonic() < deadline
+        time.sleep(.001)
+    bridge.stop_bridge()
+    worker.join(2)
+    assert not worker.is_alive()
+    assert responses[0]['code'] == 'EXPIRED'
+    assert bpy.data.collections.get('Never') is None
+finally:
+    bridge.stop_bridge()
+"""
+    )
+    result = subprocess.run(
+        [
+            blender,
+            "--background",
+            "--factory-startup",
+            "--python-exit-code",
+            "1",
+            "--python-expr",
+            code,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        env={**os.environ, "BETTER_BLENDER_STATE_DIR": str(tmp_path / "state")},
+    )
+    assert result.returncode == 0, result.stdout + result.stderr

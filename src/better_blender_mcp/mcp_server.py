@@ -48,6 +48,36 @@ def create_server(client: BlenderBridgeClient) -> Any:
 
         return await client.acall("health")
 
+    @server.tool()
+    async def get_document_context() -> dict[str, Any]:
+        """Inspect the current document/session before edits or explicit retries."""
+        return await client.acall("get_document_context")
+
+    @server.tool()
+    async def get_request_status(request_id: str) -> dict[str, Any]:
+        """Look up a durable mutation outcome, including after a disconnect."""
+        return await client.acall("get_request_status", {"request_id": request_id})
+
+    @server.tool()
+    async def execute_request(
+        request_id: Annotated[str, Field(min_length=1, max_length=128)],
+        expected_document_id: str,
+        method: str,
+        params: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Execute an edit once. Retry with the same ID and arguments; never invent a new ID
+        after an uncertain outcome. Get expected_document_id from get_document_context.
+        """
+        return await client.acall(
+            "execute_request",
+            {
+                "request_id": request_id,
+                "expected_document_id": expected_document_id,
+                "method": method,
+                "params": params,
+            },
+        )
+
     @server.tool(name="new_scene")
     async def new_scene(use_empty: bool = True) -> dict[str, Any]:
         """Create a new Blender scene from the default or empty template."""

@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import hmac
+import ipaddress
 import json
 import math
 import queue
@@ -16,6 +18,7 @@ import socketserver
 import tempfile
 import threading
 import time
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -24,7 +27,10 @@ import bpy
 from mathutils import Quaternion, Vector
 
 from . import checkpoints, inspection
+from .credentials import ensure_token
 from .jobs import RenderJobs
+from .policy import READ_METHODS, check_path
+from .requests import RequestLedger
 from .storage import state_directory
 from .validation import validate_command
 
@@ -46,6 +52,8 @@ class BridgeCommand:
     params: dict[str, Any]
     result_queue: queue.Queue[dict[str, Any]]
     deadline: float
+    document_id: str = ""
+    tracked: bool = False
     state: str = "queued"
     lock: threading.Lock = field(default_factory=threading.Lock)
 
@@ -56,7 +64,13 @@ class BridgeRuntime:
     port: int
     token: str
     timeout_seconds: float
+    read_only: bool = False
+    allowed_roots: tuple = ()
     allow_unsafe_code: bool = False
+    session_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    document_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    scene_pointer: int = 0
+    ledger: RequestLedger | None = None
     running: bool = False
     server: socketserver.ThreadingTCPServer | None = None
     thread: threading.Thread | None = None
@@ -147,7 +161,7 @@ class _BridgeRequestHandler(socketserver.StreamRequestHandler):
             self._write({"id": "unknown", "ok": False, "error": "Invalid request envelope"})
             return
 
-        if token != runtime.token:
+        if not isinstance(token, str) or not hmac.compare_digest(token, runtime.token):
             self._write({"id": request_id, "ok": False, "error": "Unauthorized"})
             return
 
@@ -155,7 +169,30 @@ class _BridgeRequestHandler(socketserver.StreamRequestHandler):
             self._write({"id": request_id, "ok": False, "error": "params must be an object"})
             return
 
-        if method in {"get_job_status", "cancel_job", "list_jobs", "get_job_image"}:
+        if method == "execute_request":
+            try:
+                validate_command(method, params)
+                request_id = params["request_id"]
+                payload["expected_document_id"] = params["expected_document_id"]
+                method, params = params["method"], params["params"]
+                if method == "execute_request":
+                    raise ValueError("Nested execute_request is not supported")
+            except (ValueError, KeyError) as exc:
+                self._write({"id": payload["id"], "ok": False, "error": str(exc)})
+                return
+            # Preserve the transport ID while the journal uses the caller's stable ID.
+            self.transport_id = payload["id"]
+
+        if method == "get_request_status":
+            try:
+                validate_command(method, params)
+                result = runtime.ledger.status(params["request_id"])
+                self._write({"id": request_id, "ok": True, "result": result})
+            except ValueError as exc:
+                self._write({"id": request_id, "ok": False, "error": str(exc)})
+            return
+
+        if method in {"get_job_status", "list_jobs", "get_job_image"}:
             try:
                 validate_command(method, params)
                 if method == "list_jobs":
@@ -163,6 +200,10 @@ class _BridgeRequestHandler(socketserver.StreamRequestHandler):
                         params.get("offset", 0), params.get("limit", 50)
                     )
                 elif method == "get_job_image":
+                    if runtime.allowed_roots:
+                        job = runtime.render_jobs.status(params["job_id"])
+                        for output in (job.get("result") or {}).get("outputs", []):
+                            check_path(output, runtime.allowed_roots)
                     result = runtime.render_jobs.image(params["job_id"], params.get("index", 0))
                 else:
                     operation = (
@@ -193,15 +234,46 @@ class _BridgeRequestHandler(socketserver.StreamRequestHandler):
             params=params,
             result_queue=result_queue,
             deadline=time.monotonic() + timeout,
+            document_id=payload.get("expected_document_id", runtime.document_id),
+            tracked=method not in READ_METHODS,
         )
 
         if runtime.command_queue is None:
             self._write({"id": request_id, "ok": False, "error": "Bridge not initialized"})
             return
 
+        if command.tracked:
+            try:
+                if not runtime.ledger.admit(request_id, method, params):
+                    status = runtime.ledger.status(request_id)
+                    response = status.get("response") or {
+                        "id": request_id,
+                        "ok": False,
+                        "code": "OUTCOME_UNKNOWN",
+                        "error": f"Request is {status['state']}; check get_request_status.",
+                    }
+                    self._write(response)
+                    return
+            except (ValueError, OSError) as exc:
+                self._write(
+                    {"id": request_id, "ok": False, "error": str(exc), "code": "REQUEST_REJECTED"}
+                )
+                return
+
         try:
             runtime.command_queue.put_nowait(command)
         except queue.Full:
+            if command.tracked:
+                runtime.ledger.update(
+                    request_id,
+                    "expired",
+                    {
+                        "id": request_id,
+                        "ok": False,
+                        "error": "Queue full; no changes made",
+                        "code": "BUSY",
+                    },
+                )
             self._write(
                 {"id": request_id, "ok": False, "error": "Command queue full", "code": "BUSY"}
             )
@@ -234,6 +306,12 @@ class _BridgeRequestHandler(socketserver.StreamRequestHandler):
         self._write(response)
 
     def _write(self, payload: dict[str, Any]) -> None:
+        payload = dict(payload)
+        if hasattr(self, "transport_id"):
+            payload["id"] = self.transport_id
+        runtime = self.server.runtime
+        payload["document_id"] = runtime.document_id
+        payload["session_id"] = runtime.session_id
         try:
             raw = json.dumps(payload, allow_nan=False).encode("utf-8") + b"\n"
             if len(raw) > MAX_RESPONSE_BYTES:
@@ -288,7 +366,7 @@ def _normalize_path(raw: Any, *, require_exists: bool) -> str:
     if not isinstance(raw, str) or not raw.strip():
         raise ValueError("filepath must be a non-empty string")
 
-    path = Path(raw).expanduser().resolve()
+    path = check_path(raw, _RUNTIME.allowed_roots if _RUNTIME else ())
     if require_exists and not path.exists():
         raise ValueError(f"Path does not exist: {path}")
 
@@ -765,6 +843,24 @@ def _preflight(method: str, params: dict[str, Any]) -> None:
 
 
 def _dispatch_command(method: str, params: dict[str, Any]) -> dict[str, Any]:
+    if _RUNTIME is not None:
+        if _RUNTIME.read_only and method not in READ_METHODS:
+            raise ValueError("Bridge is in read-only mode")
+        if method == "execute_code" and _RUNTIME.allowed_roots:
+            raise ValueError("Unsafe code is disabled when path restrictions are configured")
+
+    if method == "cancel_job":
+        validate_command(method, params)
+        return _RUNTIME.render_jobs.cancel(params["job_id"])
+    if method == "get_document_context":
+        validate_command(method, params)
+        return {
+            "document_id": _RUNTIME.document_id,
+            "session_id": _RUNTIME.session_id,
+            "filepath": bpy.data.filepath,
+            "scene": bpy.context.scene.name,
+        }
+
     if method in {
         "create_checkpoint",
         "list_checkpoints",
@@ -790,6 +886,9 @@ def _dispatch_command(method: str, params: dict[str, Any]) -> dict[str, Any]:
         render_method = params["method"]
         render_params = params["params"]
         _preflight(render_method, render_params)
+        for key in ("filepath", "output_dir"):
+            if render_params.get(key):
+                _normalize_path(render_params[key], require_exists=False)
         if _RUNTIME is None:
             raise ValueError("Bridge runtime unavailable")
         directory = Path(tempfile.mkdtemp(prefix="better-blender-render-"))
@@ -837,7 +936,7 @@ def _dispatch_command(method: str, params: dict[str, Any]) -> dict[str, Any]:
 
     if method == "open_blend":
         filepath = _normalize_path(params.get("filepath"), require_exists=True)
-        bpy.ops.wm.open_mainfile(filepath=filepath)
+        bpy.ops.wm.open_mainfile(filepath=filepath, use_scripts=False)
         return _dispatch_command("get_scene_info", {})
 
     if method == "save_blend":
@@ -845,6 +944,7 @@ def _dispatch_command(method: str, params: dict[str, Any]) -> dict[str, Any]:
         if filepath is None:
             if not bpy.data.filepath:
                 raise ValueError("Current blend file has no path. Provide filepath.")
+            _normalize_path(bpy.data.filepath, require_exists=False)
             bpy.ops.wm.save_mainfile()
         else:
             normalized = _normalize_path(filepath, require_exists=False)
@@ -2557,48 +2657,78 @@ def _supported_methods() -> list[str]:
     ]
 
 
-def _drain_command_queue() -> float | None:
-    global _RUNTIME
-    global _TIMER_REGISTERED
+@bpy.app.handlers.persistent
+def _document_loaded(_unused):
+    if _RUNTIME is not None:
+        _RUNTIME.document_id = str(uuid.uuid4())
+        _RUNTIME.scene_pointer = bpy.context.scene.as_pointer()
 
-    if _RUNTIME is None or not _RUNTIME.running or _RUNTIME.command_queue is None:
+
+def _sync_document(runtime):
+    pointer = bpy.context.scene.as_pointer()
+    if runtime.scene_pointer != pointer:
+        runtime.document_id = str(uuid.uuid4())
+        runtime.scene_pointer = pointer
+
+
+def _finish_command(runtime, command, response, state="completed"):
+    if command.tracked:
+        runtime.ledger.update(command.request_id, state, response)
+    command.state = state
+    if command.result_queue.empty():
+        command.result_queue.put_nowait(response)
+
+
+def _drain_command_queue() -> float | None:
+    global _TIMER_REGISTERED
+    runtime = _RUNTIME
+    if runtime is None or not runtime.running or runtime.command_queue is None:
         _TIMER_REGISTERED = False
         return None
-
-    drained = 0
-    max_per_tick = 25
-
-    while drained < max_per_tick:
+    _sync_document(runtime)
+    for _ in range(25):
         try:
-            command = _RUNTIME.command_queue.get_nowait()
+            command = runtime.command_queue.get_nowait()
         except queue.Empty:
             break
-
-        drained += 1
         with command.lock:
             if command.state == "expired" or time.monotonic() >= command.deadline:
-                command.state = "expired"
-                command.result_queue.put_nowait(
+                _finish_command(
+                    runtime,
+                    command,
                     {
                         "id": command.request_id,
                         "ok": False,
                         "error": "Request expired before execution; no changes made.",
                         "code": "EXPIRED",
-                    }
+                    },
+                    "expired",
                 )
                 continue
+            _sync_document(runtime)
+            if command.tracked and command.document_id != runtime.document_id:
+                _finish_command(
+                    runtime,
+                    command,
+                    {
+                        "id": command.request_id,
+                        "ok": False,
+                        "code": "DOCUMENT_CHANGED",
+                        "error": "Document or scene changed; inspect it before a new edit.",
+                    },
+                )
+                continue
+            if command.tracked:
+                runtime.ledger.update(command.request_id, "running")
             command.state = "running"
-
         try:
             result = _dispatch_command(command.method, command.params)
             response = {"id": command.request_id, "ok": True, "result": result}
-        except Exception as exc:  # pylint: disable=broad-except
+        except Exception as exc:
             response = {"id": command.request_id, "ok": False, "error": str(exc)}
-
+        _sync_document(runtime)
         with command.lock:
-            command.result_queue.put_nowait(response)
-            command.state = "completed"
-
+            _finish_command(runtime, command, response)
     return 0.05
 
 
@@ -2630,7 +2760,10 @@ def start_bridge(context: bpy.types.Context | None = None) -> None:
     start_bridge_with_config(
         host=prefs.host,
         port=prefs.port,
-        token=prefs.token,
+        token=prefs.token if prefs.token and prefs.token != "change-me" else ensure_token(),
+        read_only=prefs.read_only,
+        allowed_roots=(prefs.allowed_directory,) if prefs.allowed_directory else (),
+        allow_remote=prefs.allow_remote,
         timeout_seconds=prefs.timeout_seconds,
         allow_unsafe_code=prefs.allow_unsafe_code,
         register_timer=True,
@@ -2644,13 +2777,28 @@ def start_bridge_with_config(
     timeout_seconds: float = 30.0,
     allow_unsafe_code: bool = False,
     register_timer: bool = True,
+    read_only: bool = False,
+    allowed_roots: tuple = (),
+    allow_remote: bool = False,
 ) -> None:
     global _RUNTIME
 
     if _RUNTIME is not None and _RUNTIME.running:
         return
 
+    try:
+        loopback = ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        loopback = host.lower() == "localhost"
+    if not loopback and not allow_remote:
+        raise ValueError("Nonlocal binding requires explicit allow_remote opt-in")
+    if not token or token == "change-me":
+        token = ensure_token()
+    if not loopback and len(token) < 32:
+        raise ValueError("Nonlocal binding requires a token of at least 32 characters")
     runtime = BridgeRuntime(
+        read_only=read_only,
+        allowed_roots=tuple(Path(root).expanduser().resolve() for root in allowed_roots),
         host=host,
         port=port,
         token=token,
@@ -2663,6 +2811,8 @@ def start_bridge_with_config(
     server = _BridgeTCPServer((runtime.host, runtime.port), _BridgeRequestHandler, runtime)
     namespace = hashlib.sha256(f"{host}:{server.server_address[1]}".encode()).hexdigest()[:16]
     runtime.render_jobs = RenderJobs(state_directory() / "jobs" / namespace)
+    runtime.ledger = RequestLedger(state_directory() / "requests" / (namespace + ".sqlite3"))
+    runtime.scene_pointer = bpy.context.scene.as_pointer()
     thread = threading.Thread(
         target=server.serve_forever,
         name="better-blender-bridge",
@@ -2672,6 +2822,8 @@ def start_bridge_with_config(
     runtime.thread = thread
 
     _RUNTIME = runtime
+    if _document_loaded not in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.append(_document_loaded)
     if register_timer:
         _register_timer_if_needed()
     thread.start()
@@ -2690,6 +2842,25 @@ def stop_bridge() -> None:
 
     runtime = _RUNTIME
     runtime.running = False
+    if _document_loaded in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.remove(_document_loaded)
+    while runtime.command_queue is not None:
+        try:
+            command = runtime.command_queue.get_nowait()
+        except queue.Empty:
+            break
+        with command.lock:
+            _finish_command(
+                runtime,
+                command,
+                {
+                    "id": command.request_id,
+                    "ok": False,
+                    "error": "Bridge stopped before execution",
+                    "code": "EXPIRED",
+                },
+                "expired",
+            )
     runtime.render_jobs.shutdown()
 
     if runtime.server is not None:
@@ -2707,7 +2878,12 @@ class BetterBlenderPreferences(bpy.types.AddonPreferences):
 
     host: bpy.props.StringProperty(name="Host", default="127.0.0.1")
     port: bpy.props.IntProperty(name="Port", default=8765, min=1024, max=65535)
-    token: bpy.props.StringProperty(name="Token", default="change-me")
+    token: bpy.props.StringProperty(name="Token override", default="", subtype="PASSWORD")
+    read_only: bpy.props.BoolProperty(name="Read-only mode", default=False)
+    allowed_directory: bpy.props.StringProperty(
+        name="Allowed tool directory", default="", subtype="DIR_PATH"
+    )
+    allow_remote: bpy.props.BoolProperty(name="Allow nonlocal binding", default=False)
     timeout_seconds: bpy.props.FloatProperty(
         name="Request Timeout", default=30.0, min=1.0, max=300.0
     )
@@ -2725,6 +2901,9 @@ class BetterBlenderPreferences(bpy.types.AddonPreferences):
         layout.prop(self, "token")
         layout.prop(self, "timeout_seconds")
         layout.prop(self, "allow_unsafe_code")
+        layout.prop(self, "read_only")
+        layout.prop(self, "allowed_directory")
+        layout.prop(self, "allow_remote")
 
 
 class BbOtStartBridge(bpy.types.Operator):

@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
+from better_blender_mcp.credentials import read_token
+
 
 @dataclass(frozen=True)
 class BridgeConfig:
@@ -12,7 +14,7 @@ class BridgeConfig:
 
     host: str = "127.0.0.1"
     port: int = 8765
-    token: str = "change-me"
+    token: str = ""
     timeout_seconds: float = 30.0
 
 
@@ -28,7 +30,9 @@ def load_config_from_env() -> AppConfig:
 
     host = os.getenv("BETTER_BLENDER_HOST", "127.0.0.1")
     port = int(os.getenv("BETTER_BLENDER_PORT", "8765"))
-    token = os.getenv("BETTER_BLENDER_TOKEN", "change-me")
+    token = (
+        os.environ["BETTER_BLENDER_TOKEN"] if "BETTER_BLENDER_TOKEN" in os.environ else read_token()
+    )
     timeout_seconds = float(os.getenv("BETTER_BLENDER_TIMEOUT", "30"))
 
     return AppConfig(

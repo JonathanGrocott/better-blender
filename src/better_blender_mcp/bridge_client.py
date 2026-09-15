@@ -7,7 +7,7 @@ import json
 import socket
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from better_blender_mcp.config import BridgeConfig
@@ -30,6 +30,7 @@ class BlenderBridgeClient:
     """Simple request/response client over local TCP with newline-delimited JSON."""
 
     config: BridgeConfig
+    document_id: str | None = field(default=None, init=False)
 
     async def acall(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         """Wait for bridge I/O without blocking the MCP event loop.
@@ -49,7 +50,10 @@ class BlenderBridgeClient:
 
         sent = False
         try:
-            raw_request = json.dumps(request.to_json(), allow_nan=False).encode("utf-8") + b"\n"
+            envelope = request.to_json()
+            if self.document_id is not None:
+                envelope["expected_document_id"] = self.document_id
+            raw_request = json.dumps(envelope, allow_nan=False).encode("utf-8") + b"\n"
             if len(raw_request) > MAX_REQUEST_BYTES:
                 raise BridgeError("Request exceeds 1 MiB limit", "REQUEST_TOO_LARGE")
             endpoint = (self.config.host, self.config.port)
@@ -59,13 +63,18 @@ class BlenderBridgeClient:
                 sent = True
                 conn.sendall(raw_request)
                 response_line = self._read_line(conn, deadline)
-            response = BridgeResponse.from_json(json.loads(response_line))
+            payload = json.loads(response_line)
+            response = BridgeResponse.from_json(payload)
+            if response.ok and isinstance(payload.get("document_id"), str):
+                self.document_id = payload["document_id"]
         except (ValueError, UnicodeError) as exc:
             raise BridgeError(f"Invalid bridge message: {exc}", "INVALID_MESSAGE") from exc
         except OSError as exc:
             code = "OUTCOME_UNKNOWN" if sent else "CONNECTION_ERROR"
             detail = " Operation outcome unknown; do not retry automatically." if sent else ""
-            raise BridgeError(f"Bridge connection failed: {exc}.{detail}", code) from exc
+            raise BridgeError(
+                f"Bridge connection failed: {exc}.{detail} Request ID: {request.request_id}", code
+            ) from exc
 
         if response.code == "BUSY" and response.request_id == "unknown":
             raise BridgeError(response.error or "Bridge busy", "BUSY")
@@ -76,7 +85,8 @@ class BlenderBridgeClient:
 
         if not response.ok:
             raise BridgeError(
-                response.error or "Unknown bridge error", response.code or "COMMAND_ERROR"
+                f"{response.error or 'Unknown bridge error'} (request ID: {request.request_id})",
+                response.code or "COMMAND_ERROR",
             )
 
         return response.result or {}

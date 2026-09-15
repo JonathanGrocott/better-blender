@@ -17,12 +17,18 @@ from typing import Any
 
 from better_blender_mcp.bridge_client import BlenderBridgeClient
 from better_blender_mcp.config import load_config_from_env
+from better_blender_mcp.credentials import ensure_token
 from better_blender_mcp.mcp_server import run_server
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
+
+    if args.command == "setup":
+        ensure_token()
+        print("Generated token is ready; leave Blender’s token override blank.")
+        return 0
 
     if args.command == "serve":
         run_server()
@@ -46,6 +52,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="better-blender-mcp")
     subparsers = parser.add_subparsers(dest="command")
 
+    subparsers.add_parser("setup", help="Create a unique per-user bridge token")
     subparsers.add_parser("serve", help="Run the MCP server")
     subparsers.add_parser("doctor", help="Run local environment diagnostics")
 
@@ -84,7 +91,7 @@ def _run_doctor() -> int:
         "bridge": {
             "host": config.bridge.host,
             "port": config.bridge.port,
-            "token_configured": config.bridge.token != "change-me",
+            "token_configured": bool(config.bridge.token) and config.bridge.token != "change-me",
             "timeout_seconds": config.bridge.timeout_seconds,
         },
         "blender_executable": str(blender_path) if blender_path else None,
@@ -157,7 +164,7 @@ def _print_config(target: str) -> None:
         "env": {
             "BETTER_BLENDER_HOST": "127.0.0.1",
             "BETTER_BLENDER_PORT": "8765",
-            "BETTER_BLENDER_TOKEN": "change-me",
+            "BETTER_BLENDER_TOKEN": load_config_from_env().bridge.token or ensure_token(),
         },
     }
 
@@ -223,6 +230,7 @@ def _install_addon(version: str, destination: str | None) -> int:
         if not preserve_backup:
             shutil.rmtree(staging, ignore_errors=True)
 
+    ensure_token()
     print(f"Installed add-on to: {target}")
     return 0
 
