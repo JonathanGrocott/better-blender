@@ -152,7 +152,7 @@ MCP `render_still`, `render_animation`, and `workflow_turntable_render` now retu
 `cancel_job` terminates only the isolated render worker; partial output files remain.
 The open scene and its file path are unchanged, including for turntable setup.
 External assets must remain available while the job runs. Two render workers may run
-at once. The bridge keeps 32 completed job records in memory; restart clears history
+at once. The bridge keeps 32 completed job records on disk; restart preserves history
 and stops workers. Temporary snapshots are removed after completion. Existing direct
 bridge render methods remain synchronous for compatibility.
 
@@ -166,3 +166,31 @@ have stable error codes on `BridgeError.code`. Screenshots carry at most 8 MiB o
 bytes before base64 encoding. Normal scene tool requests use generated strict input
 schemas, with reference checks before mutation. These checks are not a transaction or
 rollback guarantee for arbitrary Blender operator failures or unsafe Python execution.
+
+
+## Recovery and inspection (0.4)
+
+`create_checkpoint` saves a whole-file copy; `list_checkpoints` lists them newest first.
+`restore_checkpoint` backs up the current document by default, then opens a separate
+working copy beside the immutable snapshot. Use `save_blend` to choose a final path.
+`run_with_checkpoint` wraps supported destructive scene/animation operations; failures
+include the recovery checkpoint ID. Checkpoints are explicit snapshots, not automatic
+transactions or copies of every external asset. Keep external assets available.
+
+`list_objects` accepts a name substring, object type, collection, offset, and limit
+(default 100, maximum 500). Results are sorted by name with total and next_offset.
+Objects include parent, collection membership, visibility and matrix_world. Optional
+`evaluated=true` on get_object_info adds world bounds after modifiers/dependencies.
+`get_node_info` supports geometry, material and compositor trees and reports socket
+identifiers, indices, types, defaults and writable RNA properties.
+
+`list_jobs` includes persisted terminal history. `get_job_image` returns a recorded
+PNG/JPEG output by index; arbitrary paths are not accepted. Render-write callbacks
+report completed frames, total frames and progress fraction. There is no estimated
+progress within a single frame. Up to 1,000 output paths are recorded per job.
+Jobs interrupted by an unclean restart are marked interrupted; they are not resumed.
+
+State is stored under ~/.better-blender, or BETTER_BLENDER_STATE_DIR when configured
+in the Blender process environment. Job history is namespaced by bridge endpoint.
+Checkpoint files remain until removed by the user. Completed job history is bounded
+to 32 records; render output files remain caller-owned and are never pruned.

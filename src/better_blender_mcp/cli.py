@@ -9,6 +9,7 @@ import os
 import platform
 import shutil
 import sys
+import tempfile
 from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
@@ -101,7 +102,14 @@ def _run_doctor() -> int:
             int(v) for v in str(status.get("blender_version", "0")).split()[0].split(".")
         )
         capabilities = status.get("capabilities", {})
-        required = {"render_jobs", "inline_images", "strict_inputs"}
+        required = {
+            "render_jobs",
+            "inline_images",
+            "strict_inputs",
+            "checkpoints",
+            "node_inspection",
+            "persistent_jobs",
+        }
         missing = sorted(key for key in required if capabilities.get(key) is not True)
         healthy = status.get("protocol_version") == 1 and version >= (3, 4, 1) and not missing
         report["bridge"]["missing_capabilities"] = missing
@@ -183,10 +191,38 @@ def _install_addon(version: str, destination: str | None) -> int:
     addon_target_dir.mkdir(parents=True, exist_ok=True)
     target = addon_target_dir / "better_blender_bridge"
 
-    if target.exists():
-        shutil.rmtree(target)
+    if target.resolve() == addon_source.resolve():
+        print(
+            "Destination is the source package; choose a Blender add-ons directory.",
+            file=sys.stderr,
+        )
+        return 1
+    staging = Path(tempfile.mkdtemp(prefix=".better-blender-install-", dir=addon_target_dir))
+    incoming, backup = staging / "incoming", staging / "previous"
+    preserve_backup = False
+    try:
+        shutil.copytree(
+            addon_source, incoming, ignore=shutil.ignore_patterns("__pycache__", "*.pyc")
+        )
+        if target.exists():
+            target.rename(backup)
+        try:
+            incoming.rename(target)
+        except OSError:
+            if backup.exists():
+                try:
+                    backup.rename(target)
+                except OSError:
+                    preserve_backup = True
+                    print(f"Previous add-on preserved at {backup}", file=sys.stderr)
+            raise
+    except OSError as exc:
+        print(f"Add-on installation failed: {exc}", file=sys.stderr)
+        return 1
+    finally:
+        if not preserve_backup:
+            shutil.rmtree(staging, ignore_errors=True)
 
-    shutil.copytree(addon_source, target)
     print(f"Installed add-on to: {target}")
     return 0
 

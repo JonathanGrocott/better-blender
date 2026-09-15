@@ -32,6 +32,8 @@ class RenderJobs:
                 except (ValueError, KeyError, OSError):
                     continue
 
+        self.jobs = dict(sorted(self.jobs.items(), key=lambda item: item[1]["created_at"]))
+
     def _persist(self, job):
         if self.storage:
             write_json(self.storage / (job["job_id"] + ".json"), self._public(job))
@@ -94,6 +96,7 @@ class RenderJobs:
             }
             self._persist(self.jobs[job_id])
             watcher = threading.Thread(target=self._watch, args=(job_id, directory), daemon=True)
+            self.watchers = [thread for thread in self.watchers if thread.is_alive()]
             self.watchers.append(watcher)
             watcher.start()
             return self.status(job_id)

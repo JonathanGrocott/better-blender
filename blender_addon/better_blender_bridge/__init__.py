@@ -31,7 +31,7 @@ from .validation import validate_command
 bl_info = {
     "name": "Better Blender Bridge",
     "author": "Better Blender Contributors",
-    "version": (0, 3, 0),
+    "version": (0, 4, 0),
     "blender": (3, 4, 1),
     "location": "View3D > Sidebar > Better Blender",
     "description": "Local bridge for Better Blender MCP",
@@ -815,7 +815,14 @@ def _dispatch_command(method: str, params: dict[str, Any]) -> dict[str, Any]:
         return {
             "bridge_running": True,
             "protocol_version": 1,
-            "capabilities": {"render_jobs": True, "inline_images": True, "strict_inputs": True},
+            "capabilities": {
+                "render_jobs": True,
+                "inline_images": True,
+                "strict_inputs": True,
+                "checkpoints": True,
+                "node_inspection": True,
+                "persistent_jobs": True,
+            },
             "bridge_version": ".".join(str(v) for v in bl_info["version"]),
             "blender_version": bpy.app.version_string,
             "file_path": bpy.data.filepath,

@@ -38,7 +38,14 @@ def test_doctor_checks_bridge_compatibility(monkeypatch, capsys):
             "protocol_version": 1,
             "blender_version": "5.0.1",
             "bridge_running": True,
-            "capabilities": {"render_jobs": True, "inline_images": True, "strict_inputs": True},
+            "capabilities": {
+                "render_jobs": True,
+                "inline_images": True,
+                "strict_inputs": True,
+                "checkpoints": True,
+                "node_inspection": True,
+                "persistent_jobs": True,
+            },
         },
     )
     assert cli._run_doctor() == 0
@@ -85,7 +92,40 @@ def test_doctor_detects_stale_addon(monkeypatch, capsys):
     assert cli._run_doctor() == 1
     report = json.loads(capsys.readouterr().out)
     assert report["bridge"]["missing_capabilities"] == [
+        "checkpoints",
         "inline_images",
+        "node_inspection",
+        "persistent_jobs",
         "render_jobs",
         "strict_inputs",
     ]
+
+
+def test_install_failure_restores_previous_addon(tmp_path, monkeypatch):
+    target = tmp_path / "better_blender_bridge"
+    target.mkdir()
+    (target / "previous.txt").write_text("previous version")
+    rename = Path.rename
+
+    def fail_activation(self, destination):
+        if self.name == "incoming":
+            raise OSError("simulated activation failure")
+        return rename(self, destination)
+
+    monkeypatch.setattr(Path, "rename", fail_activation)
+    assert cli._install_addon("5.0", str(tmp_path)) == 1
+    assert (target / "previous.txt").read_text() == "previous version"
+    assert not list(tmp_path.glob(".better-blender-install-*"))
+
+
+def test_copy_failure_leaves_installed_addon_intact(tmp_path, monkeypatch):
+    target = tmp_path / "better_blender_bridge"
+    target.mkdir()
+    (target / "previous.txt").write_text("previous version")
+
+    def fail_copy(*args, **kwargs):
+        raise OSError("simulated disk failure")
+
+    monkeypatch.setattr(cli.shutil, "copytree", fail_copy)
+    assert cli._install_addon("5.0", str(tmp_path)) == 1
+    assert (target / "previous.txt").exists()

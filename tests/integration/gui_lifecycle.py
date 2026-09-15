@@ -5,6 +5,7 @@ import queue
 import socket
 import sys
 import threading
+import time
 import traceback
 from pathlib import Path
 
@@ -75,8 +76,30 @@ def exercise():
         assert call("get_scene_info")["objects_total"] == 0
         call("open_blend", {"filepath": str(saved)})
         assert call("get_scene_info")["objects_total"] == 3
+        job = call(
+            "start_render_job",
+            {
+                "method": "render_still",
+                "params": {
+                    "filepath": str(directory / "persisted.png"),
+                    "engine": "BLENDER_WORKBENCH",
+                    "resolution_x": 64,
+                    "resolution_y": 64,
+                },
+            },
+        )
+        deadline = time.monotonic() + 30
+        while True:
+            state = call("get_job_status", {"job_id": job["job_id"]})
+            if state["state"] != "running":
+                assert state["state"] == "completed", state
+                break
+            assert time.monotonic() < deadline
+            time.sleep(0.05)
         control("restart")
         call("health")
+        assert call("get_job_status", {"job_id": job["job_id"]})["state"] == "completed"
+        assert call("get_job_image", {"job_id": job["job_id"]})["image"]["mime_type"] == "image/png"
         control("disable_enable")
         call("health")
         control("verify_image")

@@ -97,3 +97,22 @@ pytest
 
 After updating, reinstall the add-on and restart Blender and the MCP server so both
 sides use the same protocol and schemas.
+
+
+## Recovery, inspection and distributions (0.4)
+
+- Use `create_checkpoint` before editing and `restore_checkpoint` to recover. Restores
+  open a separate working copy and back up your current document by default.
+  `run_with_checkpoint` provides the same recovery point around destructive operations.
+- `list_objects` supports filtering and pagination. `get_object_info` includes parenting,
+  world transforms, visibility and optional evaluated bounds; `get_node_info` exposes
+  sockets and editable properties for geometry, material and compositor nodes.
+- `list_jobs` shows progress and recent history across bridge restarts. `get_job_image`
+  retrieves completed PNG/JPEG outputs directly in MCP.
+- Installation stages the replacement before moving the previous add-on, and restores
+  the previous version if activation fails. Windows and macOS installation checks run in CI.
+- Successful CI runs publish **better-blender-distributions**, containing an unsigned
+  wheel, Blender add-on ZIP, and SHA256SUMS. Download it from the run's Artifacts section.
+  Build the same artifacts locally with `python scripts/build_artifacts.py`.
+- CI launches a real Blender window under Xvfb for all supported Blender versions,
+  checking enable/disable, restart, file-load timers, and OpenGL viewport capture.
