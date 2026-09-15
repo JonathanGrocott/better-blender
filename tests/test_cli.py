@@ -38,6 +38,7 @@ def test_doctor_checks_bridge_compatibility(monkeypatch, capsys):
             "protocol_version": 1,
             "blender_version": "5.0.1",
             "bridge_running": True,
+            "capabilities": {"render_jobs": True, "inline_images": True, "strict_inputs": True},
         },
     )
     assert cli._run_doctor() == 0
@@ -66,3 +67,25 @@ def test_doctor_reports_connection_failure(monkeypatch, capsys):
     report = json.loads(capsys.readouterr().out)
     assert report["bridge"]["connected"] is False
     assert "Bridge unavailable" in report["bridge"]["error"]
+
+
+def test_doctor_detects_stale_addon(monkeypatch, capsys):
+    import json
+
+    monkeypatch.setattr(cli, "_find_blender_executable", lambda: Path("/test/blender"))
+    monkeypatch.setattr(
+        cli.BlenderBridgeClient,
+        "call",
+        lambda *a: {
+            "protocol_version": 1,
+            "blender_version": "5.0.1",
+            "bridge_running": True,
+        },
+    )
+    assert cli._run_doctor() == 1
+    report = json.loads(capsys.readouterr().out)
+    assert report["bridge"]["missing_capabilities"] == [
+        "inline_images",
+        "render_jobs",
+        "strict_inputs",
+    ]

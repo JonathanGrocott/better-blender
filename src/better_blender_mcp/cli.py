@@ -100,7 +100,11 @@ def _run_doctor() -> int:
         version = tuple(
             int(v) for v in str(status.get("blender_version", "0")).split()[0].split(".")
         )
-        healthy = status.get("protocol_version") == 1 and version >= (3, 4, 1)
+        capabilities = status.get("capabilities", {})
+        required = {"render_jobs", "inline_images", "strict_inputs"}
+        missing = sorted(key for key in required if capabilities.get(key) is not True)
+        healthy = status.get("protocol_version") == 1 and version >= (3, 4, 1) and not missing
+        report["bridge"]["missing_capabilities"] = missing
         report["bridge"]["connected"] = True
         report["bridge"]["compatible"] = healthy
         report["bridge"]["runtime"] = status
