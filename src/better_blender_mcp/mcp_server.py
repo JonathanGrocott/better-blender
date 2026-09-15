@@ -49,6 +49,11 @@ def create_server(client: BlenderBridgeClient) -> Any:
         return await client.acall("health")
 
     @server.tool()
+    async def get_diagnostics() -> dict[str, Any]:
+        """Inspect queue capacity, connections, worker jobs, timing counters and recent failures."""
+        return await client.acall("get_diagnostics")
+
+    @server.tool()
     async def get_document_context() -> dict[str, Any]:
         """Inspect the current document/session before edits or explicit retries."""
         return await client.acall("get_document_context")
@@ -1118,10 +1123,40 @@ def create_server(client: BlenderBridgeClient) -> Any:
         """List stored recovery snapshots, newest first."""
         return await client.acall("list_checkpoints", {"offset": offset, "limit": limit})
 
+    @server.tool()
+    async def delete_checkpoint(checkpoint_id: str) -> dict[str, Any]:
+        """Delete a stored snapshot; preserve all restored working copies."""
+        return await client.acall("delete_checkpoint", {"checkpoint_id": checkpoint_id})
+
+    @server.tool()
+    async def get_checkpoint_usage() -> dict[str, Any]:
+        """Report snapshot/working-copy disk usage and retention limits."""
+        return await client.acall("get_checkpoint_usage")
+
+    @server.tool()
+    async def configure_checkpoint_retention(
+        max_count: PositiveInt = 20,
+        max_bytes: PositiveInt = 2147483648,
+    ) -> dict[str, Any]:
+        """Set limits and delete oldest snapshots as necessary. Working copies are preserved."""
+        return await client.acall(
+            "configure_checkpoint_retention",
+            {
+                "max_count": max_count,
+                "max_bytes": max_bytes,
+            },
+        )
+
+    @server.tool()
+    async def check_assets(checkpoint_id: str | None = None) -> dict[str, Any]:
+        """Report missing external files in the current document or a checkpoint manifest."""
+        return await client.acall("check_assets", {"checkpoint_id": checkpoint_id})
+
     @server.tool(name="restore_checkpoint")
     async def restore_checkpoint(
         checkpoint_id: str,
         backup_current: bool = True,
+        allow_missing_assets: bool = False,
     ) -> dict[str, Any]:
         """Restore a snapshot into a working copy. Save it to your desired path afterward.
 
@@ -1132,6 +1167,7 @@ def create_server(client: BlenderBridgeClient) -> Any:
             {
                 "checkpoint_id": checkpoint_id,
                 "backup_current": backup_current,
+                "allow_missing_assets": allow_missing_assets,
             },
         )
 

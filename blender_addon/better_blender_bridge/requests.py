@@ -77,6 +77,12 @@ class RequestLedger:
             "updated_at": row[2],
         }
 
+    def stats(self):
+        with self.lock:
+            rows = self.db.execute("SELECT state, count(*) FROM requests GROUP BY state").fetchall()
+        states = dict(rows)
+        return {"states": states, "count": sum(states.values()), "capacity": self.capacity}
+
     def close(self):
         with self.lock:
             self.db.close()

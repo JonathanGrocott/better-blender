@@ -20,9 +20,12 @@ MAX_RESPONSE_BYTES = 16 * 1024 * 1024
 class BridgeError(RuntimeError):
     """A transport or Blender failure with a stable machine-readable code."""
 
-    def __init__(self, message: str, code: str = "BRIDGE_ERROR") -> None:
+    def __init__(
+        self, message: str, code: str = "BRIDGE_ERROR", request_id: str | None = None
+    ) -> None:
         super().__init__(message)
         self.code = code
+        self.request_id = request_id
 
 
 @dataclass
@@ -67,8 +70,16 @@ class BlenderBridgeClient:
             response = BridgeResponse.from_json(payload)
             if response.ok and isinstance(payload.get("document_id"), str):
                 self.document_id = payload["document_id"]
+        except BridgeError as exc:
+            exc.request_id = request.request_id
+            exc.args = (f"{exc} (request ID: {request.request_id})",)
+            raise
         except (ValueError, UnicodeError) as exc:
-            raise BridgeError(f"Invalid bridge message: {exc}", "INVALID_MESSAGE") from exc
+            raise BridgeError(
+                f"Invalid bridge message: {exc} (request ID: {request.request_id})",
+                "INVALID_MESSAGE",
+                request.request_id,
+            ) from exc
         except OSError as exc:
             code = "OUTCOME_UNKNOWN" if sent else "CONNECTION_ERROR"
             detail = " Operation outcome unknown; do not retry automatically." if sent else ""
@@ -87,6 +98,7 @@ class BlenderBridgeClient:
             raise BridgeError(
                 f"{response.error or 'Unknown bridge error'} (request ID: {request.request_id})",
                 response.code or "COMMAND_ERROR",
+                request.request_id,
             )
 
         return response.result or {}

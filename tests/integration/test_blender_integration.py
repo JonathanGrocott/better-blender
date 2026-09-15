@@ -835,6 +835,23 @@ try:
             raise AssertionError('Path escape accepted')
         except ValueError as exc:
             assert 'outside' in str(exc)
+    try:
+        bridge._dispatch_command('start_render_job', {'method': 'workflow_turntable_render',
+            'params': {'output_path': str(root.parent / 'outside')}})
+        raise AssertionError('Worker output path escape accepted')
+    except ValueError as exc:
+        assert 'outside' in str(exc), str(exc)
+    image = bpy.data.images.new('Missing external image', width=1, height=1)
+    image.source = 'FILE'
+    image.filepath = str(root / 'missing.png')
+    try:
+        bridge._dispatch_command('start_render_job', {'method': 'render_still',
+            'params': {'filepath': str(root / 'output.png')}})
+        raise AssertionError('Missing render assets accepted')
+    except ValueError as exc:
+        assert 'Missing external assets' in str(exc), str(exc)
+    assert bridge._RUNTIME.render_jobs.list_jobs()['total'] == 0
+    bpy.data.images.remove(image)
     link = root / 'link'
     link.symlink_to(root.parent, target_is_directory=True)
     try:
@@ -860,6 +877,122 @@ try:
     assert not worker.is_alive()
     assert responses[0]['code'] == 'EXPIRED'
     assert bpy.data.collections.get('Never') is None
+finally:
+    bridge.stop_bridge()
+"""
+    )
+    result = subprocess.run(
+        [
+            blender,
+            "--background",
+            "--factory-startup",
+            "--python-exit-code",
+            "1",
+            "--python-expr",
+            code,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        env={**os.environ, "BETTER_BLENDER_STATE_DIR": str(tmp_path / "state")},
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_checkpoint_retention_preserves_working_copies(bridge_client, tmp_path):
+    bridge_client.call("new_scene", {"use_empty": True})
+    first = bridge_client.call("create_checkpoint", {"label": "First"})
+    restored = bridge_client.call(
+        "restore_checkpoint",
+        {
+            "checkpoint_id": first["checkpoint_id"],
+            "backup_current": False,
+        },
+    )
+    working = Path(restored["filepath"])
+    assert working.exists()
+    deleted = bridge_client.call("delete_checkpoint", {"checkpoint_id": first["checkpoint_id"]})
+    assert str(working) in deleted["retained_files"]
+    assert working.exists()
+    bridge_client.call("configure_checkpoint_retention", {"max_count": 1, "max_bytes": 100000000})
+    old = bridge_client.call("create_checkpoint", {"label": "Old"})
+    newest = bridge_client.call("create_checkpoint", {"label": "Newest"})
+    assert not Path(old["filepath"]).exists()
+    assert Path(newest["filepath"]).exists()
+    usage = bridge_client.call("get_checkpoint_usage")
+    assert usage["count"] == 1 and usage["within_limits"]
+    assert usage["other_bytes"] >= working.stat().st_size
+    # Metadata captures the external paths at creation, checked afresh before restore.
+    import json
+
+    metadata_path = Path(newest["filepath"]).with_name("metadata.json")
+    metadata = json.loads(metadata_path.read_text())
+    missing = str(tmp_path / "missing-texture.png")
+    metadata["external_assets"] = [missing]
+    metadata_path.write_text(json.dumps(metadata))
+    report = bridge_client.call("check_assets", {"checkpoint_id": newest["checkpoint_id"]})
+    assert report["missing"] == [missing]
+    from better_blender_mcp.bridge_client import BridgeError
+
+    with pytest.raises(BridgeError, match="assets are missing"):
+        bridge_client.call("restore_checkpoint", {"checkpoint_id": newest["checkpoint_id"]})
+    assert bridge_client.call("get_scene_info")["file_path"] == str(working)
+
+
+def test_disconnected_retry_and_queued_document_switch(tmp_path):
+    blender = _find_blender_executable()
+    if blender is None:
+        pytest.skip("Blender executable not available")
+    addon_parent = Path(__file__).resolve().parents[2] / "blender_addon"
+    code = (
+        f"import sys; sys.path.insert(0, {str(addon_parent)!r})\n"
+        + r"""
+import json, socket, threading, time
+import bpy
+import better_blender_bridge as bridge
+bridge.start_bridge_with_config('127.0.0.1', 0, 'test', register_timer=False)
+runtime = bridge._RUNTIME
+port = runtime.server.server_address[1]
+def send(identifier, method, params):
+    sock = socket.create_connection(('127.0.0.1', port), timeout=3)
+    sock.sendall((json.dumps({'id': identifier, 'method': method, 'params': params,
+                             'token': 'test'}) + '\n').encode())
+    return sock
+def wait_depth(depth):
+    deadline = time.monotonic() + 3
+    while runtime.command_queue.qsize() < depth:
+        assert time.monotonic() < deadline
+        time.sleep(.001)
+def receive(sock):
+    with sock:
+        return json.loads(sock.makefile('rb').readline())
+try:
+    disconnected = send('lost-response', 'create_collection', {'name': 'OnlyOnce'})
+    wait_depth(1)
+    disconnected.close()
+    duplicate = receive(send('lost-response', 'create_collection', {'name': 'OnlyOnce'}))
+    assert duplicate['code'] == 'OUTCOME_UNKNOWN'
+    bridge._drain_command_queue()
+    replay = receive(send('lost-response', 'create_collection', {'name': 'OnlyOnce'}))
+    assert replay['ok'], replay
+    assert bpy.data.collections.get('OnlyOnce') is not None
+    assert bpy.data.collections.get('OnlyOnce.001') is None
+    switch = send('switch', 'new_scene', {'use_empty': True})
+    wait_depth(1)
+    stale = send('queued-old-document', 'create_collection', {'name': 'WrongDocument'})
+    wait_depth(2)
+    bridge._drain_command_queue()
+    assert receive(switch)['ok']
+    assert receive(stale)['code'] == 'DOCUMENT_CHANGED'
+    assert bpy.data.collections.get('WrongDocument') is None
+    bridge.stop_bridge()
+    bridge.start_bridge_with_config('127.0.0.1', port, 'test', register_timer=False)
+    replay = receive(send('lost-response', 'create_collection', {'name': 'OnlyOnce'}))
+    assert replay['ok'], replay
+    assert bpy.data.collections.get('OnlyOnce') is None
+    diagnostics = receive(send('diagnostics', 'get_diagnostics', {}))['result']
+    assert diagnostics['queue_depth'] == 0
+    assert diagnostics['running']
 finally:
     bridge.stop_bridge()
 """

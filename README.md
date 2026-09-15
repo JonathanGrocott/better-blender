@@ -5,8 +5,8 @@ Better Blender is a local-first MCP server and Blender add-on bridge for automat
 ## Current status
 This repository now includes:
 - `better-blender-mcp` Python package with CLI and MCP server entrypoint.
-- `better_blender_bridge` Blender add-on skeleton with authenticated local socket bridge.
-- Implemented MCP tools (first functional set):
+- `better_blender_bridge` Blender add-on with an authenticated socket bridge.
+- Implemented MCP tools:
   - System: `get_blender_status`
   - Scene/File: `new_scene`, `open_blend`, `save_blend`, `get_scene_info`, `set_timeline`
   - Collections/View Layers: `list_collections`, `create_collection`, `add_object_to_collection`, `remove_object_from_collection`, `list_view_layers`, `set_active_view_layer`, `set_collection_visibility`
@@ -49,7 +49,7 @@ better-blender-mcp install-addon --blender-version 3.4.1
 better-blender-mcp print-config --client claude-desktop
 ```
 
-Copy generated JSON into your MCP client config and set `BETTER_BLENDER_TOKEN` to the same token configured in Blender add-on preferences.
+Copy the generated JSON into your MCP client config. Installation creates a unique token shared with Blender; leave the add-on’s **Token override** blank. Existing custom tokens remain supported when configured on both sides.
 
 For full client-specific setup (Claude Desktop, VS Code GitHub Copilot, VS Code Continue, Codex), see `docs/client-setup.md`.
 
@@ -59,6 +59,7 @@ better-blender-mcp doctor
 ```
 
 ## Commands
+- `better-blender-mcp setup`: create the shared per-user token.
 - `better-blender-mcp serve`: run MCP server over stdio.
 - `better-blender-mcp doctor`: print environment diagnostics.
 - `better-blender-mcp print-config --client <target>`: print MCP config snippet.
@@ -116,3 +117,19 @@ sides use the same protocol and schemas.
   Build the same artifacts locally with `python scripts/build_artifacts.py`.
 - CI launches a real Blender window under Xvfb for all supported Blender versions,
   checking enable/disable, restart, file-load timers, and OpenGL viewport capture.
+
+
+## Safer operations and diagnostics (0.5)
+
+- Document/session IDs prevent queued edits from crossing file or scene switches.
+- `execute_request` and `get_request_status` provide durable, at-most-once edit
+  admission and outcome lookup after disconnects or restarts.
+- Generated credentials, read-only mode, optional tool-path restrictions and
+  explicit nonlocal binding opt-in are available in setup/add-on preferences.
+- Checkpoints have deletion, count/byte retention limits and disk usage reporting.
+  External asset checks run before render submission and checkpoint restore.
+- `get_diagnostics` exposes queue/worker state, recent failures and rotating
+  structured logs. The dispatcher is split into six domain modules.
+
+See [Operations](docs/operations.md) for retry semantics, migration from the old
+`change-me` token, storage limits and the scope of path/asset checks.

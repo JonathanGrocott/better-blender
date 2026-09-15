@@ -18,9 +18,9 @@ pip install -e .[dev]
 
 2. Install and enable the Blender add-on, then click **Start Bridge** in Blender.
 
-3. Use the same token in both places:
-- Blender add-on preference: token value
-- Client MCP config: `BETTER_BLENDER_TOKEN`
+3. Installation generates a shared per-user token. Leave Blender’s **Token override**
+blank and use `print-config` to generate a client configuration. For an existing
+custom token, set both the add-on override and `BETTER_BLENDER_TOKEN` to that value.
 
 ## Shared MCP Server Values
 
@@ -30,7 +30,7 @@ Use these values in each client config:
 - `args`: `["serve"]`
 - `env.BETTER_BLENDER_HOST`: `"127.0.0.1"`
 - `env.BETTER_BLENDER_PORT`: `"8765"`
-- `env.BETTER_BLENDER_TOKEN`: `"change-me"` (replace with your real token)
+- `env.BETTER_BLENDER_TOKEN`: the generated token from `print-config`
 
 You can generate a base JSON snippet with:
 
@@ -52,7 +52,7 @@ Add the server to Claude Desktop's `claude_desktop_config.json`:
       "env": {
         "BETTER_BLENDER_HOST": "127.0.0.1",
         "BETTER_BLENDER_PORT": "8765",
-        "BETTER_BLENDER_TOKEN": "change-me"
+        "BETTER_BLENDER_TOKEN": "PASTE_GENERATED_TOKEN"
       }
     }
   }
@@ -77,7 +77,7 @@ Create `.vscode/mcp.json` in your workspace:
       "env": {
         "BETTER_BLENDER_HOST": "127.0.0.1",
         "BETTER_BLENDER_PORT": "8765",
-        "BETTER_BLENDER_TOKEN": "change-me"
+        "BETTER_BLENDER_TOKEN": "PASTE_GENERATED_TOKEN"
       }
     }
   }
@@ -106,7 +106,7 @@ mcpServers:
     env:
       BETTER_BLENDER_HOST: "127.0.0.1"
       BETTER_BLENDER_PORT: "8765"
-      BETTER_BLENDER_TOKEN: "change-me"
+      BETTER_BLENDER_TOKEN: "PASTE_GENERATED_TOKEN"
 ```
 
 Then:
@@ -126,7 +126,7 @@ args = ["serve"]
 [mcp_servers.better-blender.env]
 BETTER_BLENDER_HOST = "127.0.0.1"
 BETTER_BLENDER_PORT = "8765"
-BETTER_BLENDER_TOKEN = "change-me"
+BETTER_BLENDER_TOKEN = "PASTE_GENERATED_TOKEN"
 ```
 
 Notes:

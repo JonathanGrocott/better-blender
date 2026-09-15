@@ -446,6 +446,25 @@
     "title": "capture_viewport_screenshotArguments",
     "type": "object"
   },
+  "check_assets": {
+    "additionalProperties": false,
+    "properties": {
+      "checkpoint_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Checkpoint Id"
+      }
+    },
+    "title": "check_assetsArguments",
+    "type": "object"
+  },
   "clear_animation_data": {
     "additionalProperties": false,
     "properties": {
@@ -458,6 +477,25 @@
       "object_name"
     ],
     "title": "clear_animation_dataArguments",
+    "type": "object"
+  },
+  "configure_checkpoint_retention": {
+    "additionalProperties": false,
+    "properties": {
+      "max_bytes": {
+        "default": 2147483648,
+        "exclusiveMinimum": 0,
+        "title": "Max Bytes",
+        "type": "integer"
+      },
+      "max_count": {
+        "default": 20,
+        "exclusiveMinimum": 0,
+        "title": "Max Count",
+        "type": "integer"
+      }
+    },
+    "title": "configure_checkpoint_retentionArguments",
     "type": "object"
   },
   "create_action": {
@@ -882,6 +920,20 @@
     "title": "delete_actionArguments",
     "type": "object"
   },
+  "delete_checkpoint": {
+    "additionalProperties": false,
+    "properties": {
+      "checkpoint_id": {
+        "title": "Checkpoint Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "checkpoint_id"
+    ],
+    "title": "delete_checkpointArguments",
+    "type": "object"
+  },
   "delete_object": {
     "additionalProperties": false,
     "properties": {
@@ -1045,6 +1097,18 @@
       "filepath"
     ],
     "title": "export_fileArguments",
+    "type": "object"
+  },
+  "get_checkpoint_usage": {
+    "additionalProperties": false,
+    "properties": {},
+    "title": "get_checkpoint_usageArguments",
+    "type": "object"
+  },
+  "get_diagnostics": {
+    "additionalProperties": false,
+    "properties": {},
+    "title": "get_diagnosticsArguments",
     "type": "object"
   },
   "get_document_context": {
@@ -1825,6 +1889,11 @@
   "restore_checkpoint": {
     "additionalProperties": false,
     "properties": {
+      "allow_missing_assets": {
+        "default": false,
+        "title": "Allow Missing Assets",
+        "type": "boolean"
+      },
       "backup_current": {
         "default": true,
         "title": "Backup Current",

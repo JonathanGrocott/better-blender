@@ -37,7 +37,11 @@ with tempfile.TemporaryDirectory(prefix="bb-wheel-") as work:
         ],
         check=True,
     )
-    env = {**os.environ, "PYTHONPATH": str(installed)}
+    env = {
+        **os.environ,
+        "PYTHONPATH": str(installed),
+        "BETTER_BLENDER_STATE_DIR": str(work / "state"),
+    }
     subprocess.run(
         [
             sys.executable,
@@ -63,6 +67,17 @@ with tempfile.TemporaryDirectory(prefix="bb-wheel-") as work:
         "checkpoints.py",
         "storage.py",
         "inspection.py",
+        "assets.py",
+        "credentials.py",
+        "diagnostics.py",
+        "policy.py",
+        "requests.py",
+        "commands_scene.py",
+        "commands_objects.py",
+        "commands_animation.py",
+        "commands_nodes.py",
+        "commands_rendering.py",
+        "commands_collections.py",
     ):
         assert (addon / name).exists(), name
     print("Wheel install and add-on extraction passed")

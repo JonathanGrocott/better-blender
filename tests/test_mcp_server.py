@@ -39,8 +39,11 @@ def test_generated_bridge_schemas_match_mcp_tools():
     from pathlib import Path
 
     aliases = {"get_blender_status": "health", "execute_blender_code": "execute_code"}
-    schemas = json.loads((Path(__file__).resolve().parents[1]
-                          / "blender_addon/better_blender_bridge/schemas.json").read_text())
+    schemas = json.loads(
+        (
+            Path(__file__).resolve().parents[1] / "blender_addon/better_blender_bridge/schemas.json"
+        ).read_text()
+    )
     tools = asyncio.run(create_server(BlenderBridgeClient(BridgeConfig())).list_tools())
     for tool in tools:
         expected = {**tool.inputSchema, "additionalProperties": False}

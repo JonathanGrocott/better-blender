@@ -6,7 +6,6 @@ All bpy operations execute on Blender's main thread through a timer-drained queu
 
 from __future__ import annotations
 
-import base64
 import hashlib
 import hmac
 import ipaddress
@@ -15,6 +14,7 @@ import math
 import queue
 import shutil
 import socketserver
+import sys
 import tempfile
 import threading
 import time
@@ -24,15 +24,25 @@ from pathlib import Path
 from typing import Any
 
 import bpy
-from mathutils import Quaternion, Vector
 
-from . import checkpoints, inspection
+from . import (
+    assets,
+    checkpoints,
+    commands_animation,
+    commands_collections,
+    commands_nodes,
+    commands_objects,
+    commands_rendering,
+    commands_scene,
+    inspection,
+)
 from .credentials import ensure_token
+from .diagnostics import Diagnostics
 from .jobs import RenderJobs
 from .policy import READ_METHODS, check_path
 from .requests import RequestLedger
 from .storage import state_directory
-from .validation import validate_command
+from .validation import SCHEMAS, validate_command
 
 bl_info = {
     "name": "Better Blender Bridge",
@@ -71,6 +81,8 @@ class BridgeRuntime:
     document_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     scene_pointer: int = 0
     ledger: RequestLedger | None = None
+    diagnostics: Diagnostics | None = None
+    admission_lock: threading.Lock = field(default_factory=threading.Lock)
     running: bool = False
     server: socketserver.ThreadingTCPServer | None = None
     thread: threading.Thread | None = None
@@ -120,14 +132,18 @@ class _BridgeTCPServer(socketserver.ThreadingTCPServer):
             raise
 
     def process_request_thread(self, request, client_address):
+        self.runtime.diagnostics.connection(1)
         try:
             super().process_request_thread(request, client_address)
         finally:
+            self.runtime.diagnostics.connection(-1)
             self.slots.release()
 
 
 class _BridgeRequestHandler(socketserver.StreamRequestHandler):
     def handle(self) -> None:
+        self.started_at = time.monotonic()
+        self.method = "invalid"
         runtime = self.server.runtime  # type: ignore[attr-defined]
         try:
             deadline = time.monotonic() + READ_TIMEOUT
@@ -161,6 +177,11 @@ class _BridgeRequestHandler(socketserver.StreamRequestHandler):
             self._write({"id": "unknown", "ok": False, "error": "Invalid request envelope"})
             return
 
+        if not request_id or len(request_id) > 128 or len(method) > 128:
+            self._write({"id": "unknown", "ok": False, "error": "Invalid ID or method length"})
+            return
+        self.method = method
+
         if not isinstance(token, str) or not hmac.compare_digest(token, runtime.token):
             self._write({"id": request_id, "ok": False, "error": "Unauthorized"})
             return
@@ -175,13 +196,31 @@ class _BridgeRequestHandler(socketserver.StreamRequestHandler):
                 request_id = params["request_id"]
                 payload["expected_document_id"] = params["expected_document_id"]
                 method, params = params["method"], params["params"]
-                if method == "execute_request":
-                    raise ValueError("Nested execute_request is not supported")
+                if method == "execute_request" or method in READ_METHODS:
+                    raise ValueError("execute_request requires a mutation method")
             except (ValueError, KeyError) as exc:
                 self._write({"id": payload["id"], "ok": False, "error": str(exc)})
                 return
             # Preserve the transport ID while the journal uses the caller's stable ID.
             self.transport_id = payload["id"]
+
+        if method == "get_diagnostics":
+            try:
+                validate_command(method, params)
+                result = {
+                    **runtime.diagnostics.snapshot(),
+                    "queue_depth": runtime.command_queue.qsize(),
+                    "queue_capacity": MAX_QUEUED_COMMANDS,
+                    "running": runtime.running,
+                    "session_id": runtime.session_id,
+                    "document_id": runtime.document_id,
+                    "jobs": runtime.render_jobs.list_jobs(0, 32),
+                    "request_journal": runtime.ledger.stats(),
+                }
+                self._write({"id": request_id, "ok": True, "result": result})
+            except ValueError as exc:
+                self._write({"id": request_id, "ok": False, "error": str(exc)})
+            return
 
         if method == "get_request_status":
             try:
@@ -242,42 +281,53 @@ class _BridgeRequestHandler(socketserver.StreamRequestHandler):
             self._write({"id": request_id, "ok": False, "error": "Bridge not initialized"})
             return
 
-        if command.tracked:
-            try:
-                if not runtime.ledger.admit(request_id, method, params):
-                    status = runtime.ledger.status(request_id)
-                    response = status.get("response") or {
-                        "id": request_id,
-                        "ok": False,
-                        "code": "OUTCOME_UNKNOWN",
-                        "error": f"Request is {status['state']}; check get_request_status.",
-                    }
-                    self._write(response)
-                    return
-            except (ValueError, OSError) as exc:
+        with runtime.admission_lock:
+            if not runtime.running:
                 self._write(
-                    {"id": request_id, "ok": False, "error": str(exc), "code": "REQUEST_REJECTED"}
+                    {"id": request_id, "ok": False, "error": "Bridge stopping", "code": "EXPIRED"}
                 )
                 return
-
-        try:
-            runtime.command_queue.put_nowait(command)
-        except queue.Full:
             if command.tracked:
-                runtime.ledger.update(
-                    request_id,
-                    "expired",
-                    {
-                        "id": request_id,
-                        "ok": False,
-                        "error": "Queue full; no changes made",
-                        "code": "BUSY",
-                    },
+                try:
+                    if not runtime.ledger.admit(request_id, method, params):
+                        status = runtime.ledger.status(request_id)
+                        response = status.get("response") or {
+                            "id": request_id,
+                            "ok": False,
+                            "code": "OUTCOME_UNKNOWN",
+                            "error": f"Request is {status['state']}; check get_request_status.",
+                        }
+                        self._write(response)
+                        return
+                except (ValueError, OSError) as exc:
+                    self._write(
+                        {
+                            "id": request_id,
+                            "ok": False,
+                            "error": str(exc),
+                            "code": "REQUEST_REJECTED",
+                        }
+                    )
+                    return
+
+            try:
+                runtime.command_queue.put_nowait(command)
+            except queue.Full:
+                if command.tracked:
+                    runtime.ledger.update(
+                        request_id,
+                        "expired",
+                        {
+                            "id": request_id,
+                            "ok": False,
+                            "error": "Queue full; no changes made",
+                            "code": "BUSY",
+                        },
+                    )
+                self._write(
+                    {"id": request_id, "ok": False, "error": "Command queue full", "code": "BUSY"}
                 )
-            self._write(
-                {"id": request_id, "ok": False, "error": "Command queue full", "code": "BUSY"}
-            )
-            return
+                return
 
         try:
             response = result_queue.get(timeout=max(0, command.deadline - time.monotonic()))
@@ -312,6 +362,9 @@ class _BridgeRequestHandler(socketserver.StreamRequestHandler):
         runtime = self.server.runtime
         payload["document_id"] = runtime.document_id
         payload["session_id"] = runtime.session_id
+        runtime.diagnostics.record(
+            payload.get("id", "unknown"), self.method, payload, time.monotonic() - self.started_at
+        )
         try:
             raw = json.dumps(payload, allow_nan=False).encode("utf-8") + b"\n"
             if len(raw) > MAX_RESPONSE_BYTES:
@@ -849,6 +902,17 @@ def _dispatch_command(method: str, params: dict[str, Any]) -> dict[str, Any]:
         if method == "execute_code" and _RUNTIME.allowed_roots:
             raise ValueError("Unsafe code is disabled when path restrictions are configured")
 
+    checkpoint_operations = {
+        "delete_checkpoint": lambda: checkpoints.delete(params["checkpoint_id"]),
+        "get_checkpoint_usage": checkpoints.usage,
+        "configure_checkpoint_retention": lambda: checkpoints.configure(
+            params["max_count"], params["max_bytes"]
+        ),
+        "check_assets": lambda: checkpoints.check_assets(params.get("checkpoint_id")),
+    }
+    if method in checkpoint_operations:
+        validate_command(method, params)
+        return checkpoint_operations[method]()
     if method == "cancel_job":
         validate_command(method, params)
         return _RUNTIME.render_jobs.cancel(params["job_id"])
@@ -873,7 +937,11 @@ def _dispatch_command(method: str, params: dict[str, Any]) -> dict[str, Any]:
         if method == "list_checkpoints":
             return checkpoints.list_checkpoints(params.get("offset", 0), params.get("limit", 50))
         if method == "restore_checkpoint":
-            return checkpoints.restore(params["checkpoint_id"], params.get("backup_current", True))
+            return checkpoints.restore(
+                params["checkpoint_id"],
+                params.get("backup_current", True),
+                params.get("allow_missing_assets", False),
+            )
         _preflight(params["method"], params["params"])
         saved = checkpoints.create(params.get("label", "Before destructive operation"))
         try:
@@ -886,7 +954,8 @@ def _dispatch_command(method: str, params: dict[str, Any]) -> dict[str, Any]:
         render_method = params["method"]
         render_params = params["params"]
         _preflight(render_method, render_params)
-        for key in ("filepath", "output_dir"):
+        assets.require_available()
+        for key in ("filepath", "output_path"):
             if render_params.get(key):
                 _normalize_path(render_params[key], require_exists=False)
         if _RUNTIME is None:
@@ -909,7 +978,19 @@ def _dispatch_command(method: str, params: dict[str, Any]) -> dict[str, Any]:
         except Exception:
             shutil.rmtree(directory, ignore_errors=True)
             raise
+    if method in {"render_still", "render_animation", "workflow_turntable_render"}:
+        assets.require_available()
     _preflight(method, params)
+    for domain in (
+        commands_scene,
+        commands_objects,
+        commands_animation,
+        commands_nodes,
+        commands_rendering,
+        commands_collections,
+    ):
+        if method in domain.METHODS:
+            return domain.dispatch(method, params, sys.modules[__name__])
     if method == "health":
         return {
             "bridge_running": True,
@@ -927,1628 +1008,6 @@ def _dispatch_command(method: str, params: dict[str, Any]) -> dict[str, Any]:
             "file_path": bpy.data.filepath,
             "timestamp": time.time(),
             "supported_methods": _supported_methods(),
-        }
-
-    if method == "new_scene":
-        use_empty = bool(params.get("use_empty", True))
-        bpy.ops.wm.read_homefile(use_empty=use_empty)
-        return _dispatch_command("get_scene_info", {})
-
-    if method == "open_blend":
-        filepath = _normalize_path(params.get("filepath"), require_exists=True)
-        bpy.ops.wm.open_mainfile(filepath=filepath, use_scripts=False)
-        return _dispatch_command("get_scene_info", {})
-
-    if method == "save_blend":
-        filepath = params.get("filepath")
-        if filepath is None:
-            if not bpy.data.filepath:
-                raise ValueError("Current blend file has no path. Provide filepath.")
-            _normalize_path(bpy.data.filepath, require_exists=False)
-            bpy.ops.wm.save_mainfile()
-        else:
-            normalized = _normalize_path(filepath, require_exists=False)
-            Path(normalized).parent.mkdir(parents=True, exist_ok=True)
-            bpy.ops.wm.save_as_mainfile(filepath=normalized)
-
-        return {"file_path": bpy.data.filepath}
-
-    if method == "get_scene_info":
-        scene = bpy.context.scene
-        return {
-            "scene_name": scene.name,
-            "frame_current": scene.frame_current,
-            "frame_start": scene.frame_start,
-            "frame_end": scene.frame_end,
-            "objects_total": len(scene.objects),
-            "collections_total": len(bpy.data.collections),
-            "file_path": bpy.data.filepath,
-        }
-
-    if method == "set_timeline":
-        scene = bpy.context.scene
-
-        frame_start = params.get("frame_start")
-        frame_end = params.get("frame_end")
-        frame_current = params.get("frame_current")
-        fps = params.get("fps")
-
-        if isinstance(frame_start, int):
-            scene.frame_start = frame_start
-        if isinstance(frame_end, int):
-            scene.frame_end = frame_end
-        if isinstance(frame_current, int):
-            scene.frame_set(frame_current)
-        if isinstance(fps, int) and fps > 0:
-            scene.render.fps = fps
-
-        return {
-            "frame_start": scene.frame_start,
-            "frame_end": scene.frame_end,
-            "frame_current": scene.frame_current,
-            "fps": scene.render.fps,
-        }
-
-    if method == "list_objects":
-        query = params.get("query", "").casefold()
-        object_type = params.get("object_type")
-        collection = params.get("collection_name")
-        if collection is not None:
-            _require_collection(collection)
-        matches = sorted(
-            (
-                obj
-                for obj in bpy.context.scene.objects
-                if query in obj.name.casefold()
-                and (not object_type or obj.type == object_type.upper())
-                and (collection is None or collection in {c.name for c in obj.users_collection})
-            ),
-            key=lambda obj: obj.name,
-        )
-        offset, limit = params.get("offset", 0), params.get("limit", 100)
-        objects = [_serialize_object(obj) for obj in matches[offset : offset + limit]]
-        return {
-            "objects": objects,
-            "count": len(objects),
-            "total": len(matches),
-            "next_offset": offset + limit if offset + limit < len(matches) else None,
-        }
-
-    if method == "get_object_info":
-        obj = _require_object(params.get("name"))
-        return {
-            "object": {
-                **_serialize_object(obj),
-                **inspection.object_details(obj, params.get("evaluated", False)),
-            }
-        }
-
-    if method == "get_node_info":
-        tree_type = params.get("tree_type", "GEOMETRY")
-        if tree_type == "GEOMETRY":
-            obj = _require_object(params.get("object_name"))
-            modifier = _require_modifier(obj, params.get("modifier_name", "GeometryNodes"))
-            tree = modifier.node_group if modifier.type == "NODES" else None
-        elif tree_type == "MATERIAL":
-            tree = _require_material(params.get("material_name")).node_tree
-        else:
-            tree = _require_node_tree(bpy.context.scene)
-        if tree is None:
-            raise ValueError("Node tree is not configured")
-        return inspection.node_details(tree, params["node_name"])
-
-    if method == "create_primitive":
-        _require_object_mode()
-        primitive = params.get("primitive", "CUBE")
-        if not isinstance(primitive, str):
-            raise ValueError("primitive must be a string")
-
-        primitive = primitive.upper()
-        name = params.get("name")
-        location = _to_vector3(params.get("location", [0.0, 0.0, 0.0]), "location")
-        rotation = _to_vector3(params.get("rotation", [0.0, 0.0, 0.0]), "rotation")
-        scale = _to_vector3(params.get("scale", [1.0, 1.0, 1.0]), "scale")
-        size = float(params.get("size", 2.0))
-
-        if primitive == "CUBE":
-            bpy.ops.mesh.primitive_cube_add(
-                size=size,
-                location=location,
-                rotation=rotation,
-                scale=scale,
-            )
-        elif primitive == "UV_SPHERE":
-            bpy.ops.mesh.primitive_uv_sphere_add(
-                radius=size / 2,
-                location=location,
-                rotation=rotation,
-                scale=scale,
-            )
-        elif primitive == "ICO_SPHERE":
-            bpy.ops.mesh.primitive_ico_sphere_add(
-                radius=size / 2,
-                location=location,
-                rotation=rotation,
-                scale=scale,
-            )
-        elif primitive == "CYLINDER":
-            bpy.ops.mesh.primitive_cylinder_add(
-                radius=size / 2,
-                depth=size,
-                location=location,
-                rotation=rotation,
-                scale=scale,
-            )
-        elif primitive == "CONE":
-            bpy.ops.mesh.primitive_cone_add(
-                radius1=size / 2,
-                depth=size,
-                location=location,
-                rotation=rotation,
-                scale=scale,
-            )
-        elif primitive == "PLANE":
-            bpy.ops.mesh.primitive_plane_add(
-                size=size,
-                location=location,
-                rotation=rotation,
-                scale=scale,
-            )
-        elif primitive == "TORUS":
-            bpy.ops.mesh.primitive_torus_add(
-                major_radius=size / 2,
-                location=location,
-                rotation=rotation,
-                scale=scale,
-            )
-        elif primitive == "MONKEY":
-            bpy.ops.mesh.primitive_monkey_add(
-                size=size,
-                location=location,
-                rotation=rotation,
-                scale=scale,
-            )
-        else:
-            raise ValueError(f"Unsupported primitive: {primitive}")
-
-        obj = bpy.context.active_object
-        if obj is None:
-            raise RuntimeError("Primitive creation did not produce an active object")
-
-        if isinstance(name, str) and name:
-            obj.name = name
-
-        return {"object": _serialize_object(obj)}
-
-    if method == "delete_object":
-        obj = _require_object(params.get("name"))
-        deleted_name = obj.name
-        bpy.data.objects.remove(obj, do_unlink=True)
-        return {"deleted": deleted_name}
-
-    if method == "set_object_transform":
-        obj = _require_object(params.get("name"))
-
-        if "location" in params:
-            obj.location = _to_vector3(params["location"], "location")
-        if "rotation" in params:
-            obj.rotation_euler = _to_vector3(params["rotation"], "rotation")
-        if "scale" in params:
-            obj.scale = _to_vector3(params["scale"], "scale")
-
-        return {"object": _serialize_object(obj)}
-
-    if method == "duplicate_object":
-        _require_object_mode()
-        obj = _require_object(params.get("name"))
-        new_name = params.get("new_name")
-        linked = bool(params.get("linked", False))
-
-        bpy.ops.object.select_all(action="DESELECT")
-        obj.select_set(True)
-        bpy.context.view_layer.objects.active = obj
-        bpy.ops.object.duplicate(linked=linked)
-
-        duplicated = bpy.context.active_object
-        if duplicated is None:
-            raise RuntimeError("Duplicate operation did not return an active object")
-
-        if isinstance(new_name, str) and new_name:
-            duplicated.name = new_name
-
-        return {"object": _serialize_object(duplicated)}
-
-    if method == "keyframe_transform":
-        obj = _require_object(params.get("name"))
-        frame = params.get("frame")
-        if not isinstance(frame, int):
-            raise ValueError("frame must be an integer")
-
-        location_set = "location" in params
-        rotation_set = "rotation" in params
-        scale_set = "scale" in params
-        if not location_set and not rotation_set and not scale_set:
-            raise ValueError("At least one of location, rotation, or scale must be provided")
-
-        if location_set:
-            obj.location = _to_vector3(params["location"], "location")
-            obj.keyframe_insert(data_path="location", frame=frame)
-        if rotation_set:
-            obj.rotation_euler = _to_vector3(params["rotation"], "rotation")
-            obj.keyframe_insert(data_path="rotation_euler", frame=frame)
-        if scale_set:
-            obj.scale = _to_vector3(params["scale"], "scale")
-            obj.keyframe_insert(data_path="scale", frame=frame)
-
-        return {"object": _serialize_object(obj), "frame": frame}
-
-    if method == "insert_keyframe":
-        obj = _require_object(params.get("name"))
-        data_path = params.get("data_path")
-        frame = params.get("frame")
-        index = params.get("index", -1)
-
-        if not isinstance(data_path, str) or not data_path:
-            raise ValueError("data_path must be a non-empty string")
-        if not isinstance(frame, int):
-            raise ValueError("frame must be an integer")
-        if not isinstance(index, int):
-            raise ValueError("index must be an integer")
-
-        inserted = obj.keyframe_insert(data_path=data_path, frame=frame, index=index)
-        return {
-            "inserted": bool(inserted),
-            "name": obj.name,
-            "data_path": data_path,
-            "frame": frame,
-            "index": index,
-        }
-
-    if method == "list_animation_data":
-        obj = _require_object(params.get("name"))
-        animation_data = obj.animation_data
-        if animation_data is None or animation_data.action is None:
-            return {"name": obj.name, "has_animation": False, "action": None, "fcurves": []}
-
-        action = animation_data.action
-        curves = _iter_action_fcurves(action)
-        fcurves = []
-        for fcurve in curves:
-            fcurves.append(
-                {
-                    "data_path": fcurve.data_path,
-                    "array_index": fcurve.array_index,
-                    "keyframes": len(fcurve.keyframe_points),
-                }
-            )
-
-        return {
-            "name": obj.name,
-            "has_animation": True,
-            "action": action.name,
-            "fcurves": fcurves,
-        }
-
-    if method == "list_actions":
-        actions = [{"name": action.name, "users": action.users} for action in bpy.data.actions]
-        return {"actions": actions, "count": len(actions)}
-
-    if method == "create_action":
-        action_name = params.get("name")
-        object_name = params.get("object_name")
-        set_active = bool(params.get("set_active", True))
-
-        if not isinstance(action_name, str) or not action_name:
-            raise ValueError("name must be a non-empty string")
-
-        action = bpy.data.actions.get(action_name)
-        if action is None:
-            action = bpy.data.actions.new(name=action_name)
-
-        if isinstance(object_name, str) and object_name:
-            obj = _require_object(object_name)
-            if obj.animation_data is None:
-                obj.animation_data_create()
-            if set_active:
-                obj.animation_data.action = action
-
-        return {"action": {"name": action.name, "users": action.users}}
-
-    if method == "set_active_action":
-        object_name = params.get("object_name")
-        action_name = params.get("action_name")
-
-        obj = _require_object(object_name)
-        if not isinstance(action_name, str) or not action_name:
-            raise ValueError("action_name must be a non-empty string")
-
-        action = bpy.data.actions.get(action_name)
-        if action is None:
-            raise ValueError(f"Action not found: {action_name}")
-
-        if obj.animation_data is None:
-            obj.animation_data_create()
-        obj.animation_data.action = action
-        return {"object_name": obj.name, "active_action": action.name}
-
-    if method == "push_down_action":
-        object_name = params.get("object_name")
-        obj = _require_object(object_name)
-
-        if obj.animation_data is None or obj.animation_data.action is None:
-            raise ValueError(f"Object {obj.name} has no active action")
-
-        action = obj.animation_data.action
-        track = obj.animation_data.nla_tracks.new()
-        strip_start = int(bpy.context.scene.frame_current)
-        strip = track.strips.new(action.name, strip_start, action)
-        obj.animation_data.action = None
-
-        return {
-            "object_name": obj.name,
-            "pushed_action": action.name,
-            "track": track.name,
-            "strip": strip.name,
-        }
-
-    if method == "clear_animation_data":
-        object_name = params.get("object_name")
-        obj = _require_object(object_name)
-        obj.animation_data_clear()
-        return {"object_name": obj.name, "cleared": True}
-
-    if method == "duplicate_action":
-        action_name = params.get("action_name")
-        new_name = params.get("new_name")
-        action = _require_action(action_name)
-
-        if not isinstance(new_name, str) or not new_name:
-            new_name = f"{action.name}_copy"
-
-        copy = action.copy()
-        copy.name = new_name
-        return {"action": {"name": copy.name, "users": copy.users}}
-
-    if method == "delete_action":
-        action_name = params.get("action_name")
-        force = bool(params.get("force", False))
-        action = _require_action(action_name)
-
-        if action.users > 0 and not force:
-            raise ValueError(
-                f"Action {action.name} has {action.users} users. Set force=true to remove."
-            )
-
-        if force:
-            action.user_clear()
-        bpy.data.actions.remove(action)
-        return {"deleted_action": action_name}
-
-    if method == "list_nla_tracks":
-        object_name = params.get("object_name")
-        obj = _require_object(object_name)
-        if obj.animation_data is None:
-            return {"object_name": obj.name, "tracks": [], "count": 0}
-
-        tracks = []
-        for track in obj.animation_data.nla_tracks:
-            strips = [_serialize_nla_strip(strip) for strip in track.strips]
-            tracks.append(
-                {
-                    "name": track.name,
-                    "mute": bool(track.mute),
-                    "is_solo": bool(track.is_solo),
-                    "strips": strips,
-                }
-            )
-        return {"object_name": obj.name, "tracks": tracks, "count": len(tracks)}
-
-    if method == "create_nla_strip":
-        object_name = params.get("object_name")
-        action_name = params.get("action_name")
-        track_name = params.get("track_name")
-        strip_name = params.get("strip_name")
-        frame_start = params.get("frame_start")
-
-        obj = _require_object(object_name)
-        action = _require_action(action_name)
-        if obj.animation_data is None:
-            obj.animation_data_create()
-
-        if isinstance(track_name, str) and track_name:
-            track = obj.animation_data.nla_tracks.get(track_name)
-            if track is None:
-                track = obj.animation_data.nla_tracks.new()
-                track.name = track_name
-        else:
-            track = obj.animation_data.nla_tracks.new()
-
-        if not isinstance(frame_start, (int, float)):
-            frame_start = float(bpy.context.scene.frame_current)
-
-        new_strip_name = strip_name if isinstance(strip_name, str) and strip_name else action.name
-        strip = track.strips.new(new_strip_name, int(frame_start), action)
-        strip.name = new_strip_name
-
-        return {
-            "object_name": obj.name,
-            "track_name": track.name,
-            "strip": _serialize_nla_strip(strip),
-        }
-
-    if method == "set_nla_strip":
-        object_name = params.get("object_name")
-        track_name = params.get("track_name")
-        strip_name = params.get("strip_name")
-
-        obj = _require_object(object_name)
-        track = _require_nla_track(obj, track_name)
-        strip = _require_nla_strip(track, strip_name)
-
-        if "frame_start" in params and isinstance(params["frame_start"], (int, float)):
-            strip.frame_start = float(params["frame_start"])
-        if "frame_end" in params and isinstance(params["frame_end"], (int, float)):
-            strip.frame_end = float(params["frame_end"])
-        if "action_frame_start" in params and isinstance(
-            params["action_frame_start"], (int, float)
-        ):
-            strip.action_frame_start = float(params["action_frame_start"])
-        if "action_frame_end" in params and isinstance(params["action_frame_end"], (int, float)):
-            strip.action_frame_end = float(params["action_frame_end"])
-        if "scale" in params and isinstance(params["scale"], (int, float)):
-            strip.scale = float(params["scale"])
-        if "repeat" in params and isinstance(params["repeat"], (int, float)):
-            strip.repeat = float(params["repeat"])
-        if "mute" in params and isinstance(params["mute"], bool):
-            strip.mute = params["mute"]
-
-        return {
-            "object_name": obj.name,
-            "track_name": track.name,
-            "strip": _serialize_nla_strip(strip),
-        }
-
-    if method == "remove_nla_strip":
-        object_name = params.get("object_name")
-        track_name = params.get("track_name")
-        strip_name = params.get("strip_name")
-
-        obj = _require_object(object_name)
-        track = _require_nla_track(obj, track_name)
-        strip = _require_nla_strip(track, strip_name)
-        track.strips.remove(strip)
-        return {"object_name": obj.name, "track_name": track.name, "removed_strip": strip_name}
-
-    if method == "create_geometry_nodes_modifier":
-        object_name = params.get("object_name")
-        modifier_name = params.get("modifier_name", "GeometryNodes")
-
-        obj = _require_object(object_name)
-        if not isinstance(modifier_name, str) or not modifier_name:
-            raise ValueError("modifier_name must be a non-empty string")
-
-        modifier = obj.modifiers.get(modifier_name)
-        if modifier is None:
-            modifier = obj.modifiers.new(name=modifier_name, type="NODES")
-        elif modifier.type != "NODES":
-            raise ValueError(
-                f"Modifier {modifier_name} exists but is not a geometry nodes modifier"
-            )
-
-        node_group = _ensure_geometry_nodes_group(modifier)
-        return {
-            "object_name": obj.name,
-            "modifier": {"name": modifier.name, "type": modifier.type},
-            "node_group": node_group.name,
-        }
-
-    if method == "list_geometry_nodes":
-        object_name = params.get("object_name")
-        modifier_name = params.get("modifier_name", "GeometryNodes")
-        obj = _require_object(object_name)
-        modifier = _require_modifier(obj, modifier_name)
-
-        if modifier.type != "NODES" or modifier.node_group is None:
-            raise ValueError(
-                f"Modifier {modifier.name} is not configured with a geometry node tree"
-            )
-
-        node_group = modifier.node_group
-        nodes = [{"name": node.name, "type": node.bl_idname} for node in node_group.nodes]
-        links = []
-        for link in node_group.links:
-            links.append(
-                {
-                    "from_node": link.from_node.name,
-                    "from_socket": link.from_socket.name,
-                    "to_node": link.to_node.name,
-                    "to_socket": link.to_socket.name,
-                }
-            )
-
-        return {
-            "object_name": obj.name,
-            "modifier_name": modifier.name,
-            "node_group": node_group.name,
-            "nodes": nodes,
-            "links": links,
-        }
-
-    if method == "add_geometry_node":
-        object_name = params.get("object_name")
-        modifier_name = params.get("modifier_name", "GeometryNodes")
-        node_type = params.get("node_type")
-        node_name = params.get("node_name")
-
-        obj = _require_object(object_name)
-        modifier = _require_modifier(obj, modifier_name)
-
-        if modifier.type != "NODES":
-            raise ValueError(f"Modifier {modifier.name} is not a geometry nodes modifier")
-        if not isinstance(node_type, str) or not node_type:
-            raise ValueError("node_type must be a non-empty string")
-
-        node_group = _ensure_geometry_nodes_group(modifier)
-        node = node_group.nodes.new(node_type)
-        if isinstance(node_name, str) and node_name:
-            node.name = node_name
-
-        return {
-            "object_name": obj.name,
-            "modifier_name": modifier.name,
-            "node": {"name": node.name, "type": node.bl_idname},
-        }
-
-    if method == "link_geometry_nodes":
-        object_name = params.get("object_name")
-        modifier_name = params.get("modifier_name", "GeometryNodes")
-        from_node_name = params.get("from_node")
-        from_socket_name = params.get("from_socket")
-        to_node_name = params.get("to_node")
-        to_socket_name = params.get("to_socket")
-
-        obj = _require_object(object_name)
-        modifier = _require_modifier(obj, modifier_name)
-        if modifier.type != "NODES":
-            raise ValueError(f"Modifier {modifier.name} is not a geometry nodes modifier")
-
-        for field_name, value in (
-            ("from_node", from_node_name),
-            ("from_socket", from_socket_name),
-            ("to_node", to_node_name),
-            ("to_socket", to_socket_name),
-        ):
-            if not isinstance(value, str) or not value:
-                raise ValueError(f"{field_name} must be a non-empty string")
-
-        node_group = _ensure_geometry_nodes_group(modifier)
-        from_node = node_group.nodes.get(from_node_name)
-        to_node = node_group.nodes.get(to_node_name)
-        if from_node is None:
-            raise ValueError(f"Node not found: {from_node_name}")
-        if to_node is None:
-            raise ValueError(f"Node not found: {to_node_name}")
-
-        from_socket = from_node.outputs.get(from_socket_name)
-        to_socket = to_node.inputs.get(to_socket_name)
-        if from_socket is None:
-            raise ValueError(f"Socket not found: {from_node_name}.{from_socket_name}")
-        if to_socket is None:
-            raise ValueError(f"Socket not found: {to_node_name}.{to_socket_name}")
-
-        node_group.links.new(from_socket, to_socket)
-        return {
-            "object_name": obj.name,
-            "modifier_name": modifier.name,
-            "linked": {
-                "from_node": from_node.name,
-                "from_socket": from_socket.name,
-                "to_node": to_node.name,
-                "to_socket": to_socket.name,
-            },
-        }
-
-    if method == "add_geometry_input":
-        object_name = params.get("object_name")
-        modifier_name = params.get("modifier_name", "GeometryNodes")
-        input_name = params.get("input_name")
-        socket_type = params.get("socket_type", "NodeSocketFloat")
-        default_value = params.get("default_value")
-
-        obj = _require_object(object_name)
-        modifier = _require_modifier(obj, modifier_name)
-        if modifier.type != "NODES":
-            raise ValueError(f"Modifier {modifier.name} is not a geometry nodes modifier")
-        if not isinstance(input_name, str) or not input_name:
-            raise ValueError("input_name must be a non-empty string")
-        if not isinstance(socket_type, str) or not socket_type:
-            raise ValueError("socket_type must be a non-empty string")
-
-        node_group = _ensure_geometry_nodes_group(modifier)
-        if hasattr(node_group, "interface"):
-            socket = node_group.interface.new_socket(
-                name=input_name,
-                in_out="INPUT",
-                socket_type=socket_type,
-            )
-            identifier = socket.identifier
-            resolved_socket_type = socket.socket_type
-        else:
-            socket = node_group.inputs.new(socket_type, input_name)
-            identifier = socket.identifier if hasattr(socket, "identifier") else socket.name
-            resolved_socket_type = (
-                socket.bl_socket_idname if hasattr(socket, "bl_socket_idname") else socket_type
-            )
-
-        if default_value is not None:
-            stored_value: Any
-            if isinstance(default_value, list):
-                stored_value = tuple(default_value)
-            else:
-                stored_value = default_value
-            modifier[identifier] = stored_value
-
-        current = modifier.get(identifier)
-        if hasattr(current, "__iter__") and not isinstance(current, (str, bytes, dict)):
-            try:
-                current = list(current)
-            except TypeError:
-                pass
-
-        return {
-            "object_name": obj.name,
-            "modifier_name": modifier.name,
-            "input": {
-                "name": input_name,
-                "identifier": identifier,
-                "socket_type": resolved_socket_type,
-                "value": current,
-            },
-        }
-
-    if method == "list_geometry_inputs":
-        object_name = params.get("object_name")
-        modifier_name = params.get("modifier_name", "GeometryNodes")
-        obj = _require_object(object_name)
-        modifier = _require_modifier(obj, modifier_name)
-
-        if modifier.type != "NODES" or modifier.node_group is None:
-            raise ValueError(
-                f"Modifier {modifier.name} is not configured with a geometry node tree"
-            )
-
-        inputs = []
-        if hasattr(modifier.node_group, "interface"):
-            for item in modifier.node_group.interface.items_tree:
-                if item.item_type != "SOCKET" or item.in_out != "INPUT":
-                    continue
-
-                identifier = item.identifier
-                value: Any = modifier.get(identifier)
-                if hasattr(value, "__iter__") and not isinstance(value, (str, bytes, dict)):
-                    try:
-                        value = list(value)
-                    except TypeError:
-                        pass
-
-                use_attr_key = f"{identifier}_use_attribute"
-                attr_name_key = f"{identifier}_attribute_name"
-                inputs.append(
-                    {
-                        "name": item.name,
-                        "identifier": identifier,
-                        "socket_type": item.socket_type,
-                        "value": value,
-                        "use_attribute": bool(modifier.get(use_attr_key, False)),
-                        "attribute_name": modifier.get(attr_name_key, ""),
-                    }
-                )
-        else:
-            for socket in modifier.node_group.inputs:
-                identifier = socket.identifier if hasattr(socket, "identifier") else socket.name
-                value = modifier.get(identifier)
-                if hasattr(value, "__iter__") and not isinstance(value, (str, bytes, dict)):
-                    try:
-                        value = list(value)
-                    except TypeError:
-                        pass
-                use_attr_key = f"{identifier}_use_attribute"
-                attr_name_key = f"{identifier}_attribute_name"
-                inputs.append(
-                    {
-                        "name": socket.name,
-                        "identifier": identifier,
-                        "socket_type": getattr(socket, "bl_socket_idname", "UNKNOWN"),
-                        "value": value,
-                        "use_attribute": bool(modifier.get(use_attr_key, False)),
-                        "attribute_name": modifier.get(attr_name_key, ""),
-                    }
-                )
-
-        return {
-            "object_name": obj.name,
-            "modifier_name": modifier.name,
-            "inputs": inputs,
-            "count": len(inputs),
-        }
-
-    if method == "set_geometry_input":
-        object_name = params.get("object_name")
-        modifier_name = params.get("modifier_name", "GeometryNodes")
-        input_ref = params.get("input_name_or_identifier")
-        value = params.get("value")
-        use_attribute = params.get("use_attribute")
-        attribute_name = params.get("attribute_name")
-
-        obj = _require_object(object_name)
-        modifier = _require_modifier(obj, modifier_name)
-        if modifier.type != "NODES" or modifier.node_group is None:
-            raise ValueError(
-                f"Modifier {modifier.name} is not configured with a geometry node tree"
-            )
-
-        identifier, input_name = _resolve_geometry_input_identifier(modifier.node_group, input_ref)
-
-        if isinstance(value, list):
-            cast_value: Any = tuple(value)
-        else:
-            cast_value = value
-
-        if value is not None:
-            modifier[identifier] = cast_value
-
-        use_attr_key = f"{identifier}_use_attribute"
-        attr_name_key = f"{identifier}_attribute_name"
-        if isinstance(use_attribute, bool):
-            modifier[use_attr_key] = use_attribute
-        if isinstance(attribute_name, str):
-            modifier[attr_name_key] = attribute_name
-
-        current: Any = modifier.get(identifier)
-        if hasattr(current, "__iter__") and not isinstance(current, (str, bytes, dict)):
-            try:
-                current = list(current)
-            except TypeError:
-                pass
-
-        return {
-            "object_name": obj.name,
-            "modifier_name": modifier.name,
-            "input": {
-                "name": input_name,
-                "identifier": identifier,
-                "value": current,
-                "use_attribute": bool(modifier.get(use_attr_key, False)),
-                "attribute_name": modifier.get(attr_name_key, ""),
-            },
-        }
-
-    if method == "add_modifier":
-        obj = _require_object(params.get("object_name"))
-        modifier_type = params.get("modifier_type")
-        name = params.get("name")
-
-        if not isinstance(modifier_type, str) or not modifier_type:
-            raise ValueError("modifier_type must be a non-empty string")
-
-        modifier_name = name if isinstance(name, str) and name else modifier_type.title()
-        modifier = obj.modifiers.new(name=modifier_name, type=modifier_type.upper())
-
-        settings = params.get("settings")
-        try:
-            if isinstance(settings, dict):
-                for key in settings:
-                    prop = modifier.bl_rna.properties.get(key)
-                    if prop is None or prop.is_readonly:
-                        raise ValueError(f"Unknown or read-only modifier setting: {key}")
-                for key, value in settings.items():
-                    setattr(modifier, key, value)
-        except Exception:
-            obj.modifiers.remove(modifier)
-            raise
-
-        return {
-            "object_name": obj.name,
-            "modifier": {"name": modifier.name, "type": modifier.type},
-            "modifiers_total": len(obj.modifiers),
-        }
-
-    if method == "list_modifiers":
-        obj = _require_object(params.get("object_name"))
-        modifiers = [{"name": mod.name, "type": mod.type} for mod in obj.modifiers]
-        return {"object_name": obj.name, "modifiers": modifiers, "count": len(modifiers)}
-
-    if method == "apply_modifier":
-        obj = _require_object(params.get("object_name"))
-        modifier_name = params.get("modifier_name")
-        if not isinstance(modifier_name, str) or not modifier_name:
-            raise ValueError("modifier_name must be a non-empty string")
-
-        if obj.modifiers.get(modifier_name) is None:
-            raise ValueError(f"Modifier not found: {modifier_name}")
-
-        _set_active_object(obj)
-        bpy.ops.object.modifier_apply(modifier=modifier_name)
-        return {"object_name": obj.name, "applied_modifier": modifier_name}
-
-    if method == "remove_modifier":
-        obj = _require_object(params.get("object_name"))
-        modifier_name = params.get("modifier_name")
-        if not isinstance(modifier_name, str) or not modifier_name:
-            raise ValueError("modifier_name must be a non-empty string")
-
-        modifier = obj.modifiers.get(modifier_name)
-        if modifier is None:
-            raise ValueError(f"Modifier not found: {modifier_name}")
-
-        obj.modifiers.remove(modifier)
-        return {"object_name": obj.name, "removed_modifier": modifier_name}
-
-    if method == "add_constraint":
-        obj = _require_object(params.get("object_name"))
-        constraint_type = params.get("constraint_type")
-        constraint_name = params.get("name")
-        target_name = params.get("target_name")
-
-        if not isinstance(constraint_type, str) or not constraint_type:
-            raise ValueError("constraint_type must be a non-empty string")
-
-        constraint = obj.constraints.new(type=constraint_type.upper())
-        if isinstance(constraint_name, str) and constraint_name:
-            constraint.name = constraint_name
-
-        if isinstance(target_name, str) and target_name:
-            target = _require_object(target_name)
-            if hasattr(constraint, "target"):
-                constraint.target = target
-
-        return {
-            "object_name": obj.name,
-            "constraint": {"name": constraint.name, "type": constraint.type},
-            "constraints_total": len(obj.constraints),
-        }
-
-    if method == "list_constraints":
-        obj = _require_object(params.get("object_name"))
-        constraints = []
-        for constraint in obj.constraints:
-            constraints.append(
-                {
-                    "name": constraint.name,
-                    "type": constraint.type,
-                    "target": constraint.target.name
-                    if hasattr(constraint, "target") and constraint.target is not None
-                    else None,
-                }
-            )
-        return {"object_name": obj.name, "constraints": constraints, "count": len(constraints)}
-
-    if method == "remove_constraint":
-        obj = _require_object(params.get("object_name"))
-        constraint_name = params.get("constraint_name")
-        if not isinstance(constraint_name, str) or not constraint_name:
-            raise ValueError("constraint_name must be a non-empty string")
-
-        constraint = obj.constraints.get(constraint_name)
-        if constraint is None:
-            raise ValueError(f"Constraint not found: {constraint_name}")
-
-        obj.constraints.remove(constraint)
-        return {"object_name": obj.name, "removed_constraint": constraint_name}
-
-    if method == "create_material":
-        name = params.get("name")
-        if not isinstance(name, str) or not name:
-            raise ValueError("name must be a non-empty string")
-
-        base_color_raw = params.get("base_color", [0.8, 0.8, 0.8, 1.0])
-        if not isinstance(base_color_raw, list) or len(base_color_raw) != 4:
-            raise ValueError("base_color must be a list of 4 numbers")
-
-        base_color = [float(v) for v in base_color_raw]
-        roughness = float(params.get("roughness", 0.5))
-        metallic = float(params.get("metallic", 0.0))
-
-        material = bpy.data.materials.get(name)
-        if material is None:
-            material = bpy.data.materials.new(name=name)
-
-        material.use_nodes = True
-        nodes = material.node_tree.nodes
-        principled = nodes.get("Principled BSDF")
-        if principled is None:
-            raise RuntimeError("Principled BSDF node not found")
-
-        principled.inputs["Base Color"].default_value = base_color
-        principled.inputs["Roughness"].default_value = roughness
-        principled.inputs["Metallic"].default_value = metallic
-
-        return {
-            "material": {
-                "name": material.name,
-                "base_color": base_color,
-                "roughness": roughness,
-                "metallic": metallic,
-            }
-        }
-
-    if method == "assign_material":
-        object_name = params.get("object_name")
-        material_name = params.get("material_name")
-
-        obj = _require_object(object_name)
-        if not isinstance(material_name, str) or not material_name:
-            raise ValueError("material_name must be a non-empty string")
-
-        material = bpy.data.materials.get(material_name)
-        if material is None:
-            raise ValueError(f"Material not found: {material_name}")
-
-        if not hasattr(obj.data, "materials"):
-            raise ValueError(f"Object type {obj.type} does not support materials")
-
-        slot_index = params.get("slot_index")
-        materials = obj.data.materials
-
-        if isinstance(slot_index, int) and slot_index >= 0 and slot_index < len(materials):
-            materials[slot_index] = material
-        else:
-            materials.append(material)
-
-        return {"object": _serialize_object(obj)}
-
-    if method == "create_camera":
-        name = params.get("name", "Camera")
-        if not isinstance(name, str) or not name:
-            raise ValueError("name must be a non-empty string")
-
-        location = _to_vector3(params.get("location", [0.0, -6.0, 3.0]), "location")
-        rotation = _to_vector3(params.get("rotation", [1.1, 0.0, 0.0]), "rotation")
-        set_active = bool(params.get("set_active", True))
-
-        camera_data = bpy.data.cameras.new(f"{name}Data")
-        camera_object = bpy.data.objects.new(name, camera_data)
-        bpy.context.scene.collection.objects.link(camera_object)
-
-        camera_object.location = location
-        camera_object.rotation_euler = rotation
-
-        if set_active:
-            bpy.context.scene.camera = camera_object
-
-        return {
-            "object": _serialize_object(camera_object),
-            "active_camera": bpy.context.scene.camera.name if bpy.context.scene.camera else None,
-        }
-
-    if method == "set_active_camera":
-        camera = _require_object(params.get("name"))
-        if camera.type != "CAMERA":
-            raise ValueError(f"Object '{camera.name}' is not a camera")
-
-        bpy.context.scene.camera = camera
-        return {"active_camera": camera.name}
-
-    if method == "create_light":
-        name = params.get("name", "Light")
-        if not isinstance(name, str) or not name:
-            raise ValueError("name must be a non-empty string")
-
-        light_type = params.get("light_type", "POINT")
-        if not isinstance(light_type, str):
-            raise ValueError("light_type must be a string")
-
-        light_type = light_type.upper()
-        allowed = {"POINT", "SUN", "SPOT", "AREA"}
-        if light_type not in allowed:
-            raise ValueError(f"Unsupported light_type {light_type}. Allowed: {sorted(allowed)}")
-
-        energy = float(params.get("energy", 1000.0))
-        location = _to_vector3(params.get("location", [4.0, -4.0, 6.0]), "location")
-        rotation = _to_vector3(params.get("rotation", [0.6, 0.0, 0.8]), "rotation")
-
-        light_data = bpy.data.lights.new(name=f"{name}Data", type=light_type)
-        light_data.energy = energy
-
-        light_object = bpy.data.objects.new(name, light_data)
-        bpy.context.scene.collection.objects.link(light_object)
-        light_object.location = location
-        light_object.rotation_euler = rotation
-
-        return {"object": _serialize_object(light_object)}
-
-    if method == "enable_compositor":
-        scene = bpy.context.scene
-        use_nodes = bool(params.get("use_nodes", True))
-        clear_nodes = bool(params.get("clear_nodes", False))
-        if hasattr(scene, "use_nodes"):
-            scene.use_nodes = use_nodes
-
-        node_tree = _get_or_create_compositor_tree(scene)
-
-        if clear_nodes:
-            node_tree.nodes.clear()
-            render_layers = node_tree.nodes.new("CompositorNodeRLayers")
-            if "Image" in render_layers.outputs:
-                output = node_tree.nodes.new("CompositorNodeOutputFile")
-                node_tree.links.new(render_layers.outputs["Image"], output.inputs[0])
-
-        return {
-            "use_nodes": bool(getattr(scene, "use_nodes", use_nodes)),
-            "nodes_total": len(node_tree.nodes),
-        }
-
-    if method == "list_compositor_nodes":
-        scene = bpy.context.scene
-        node_tree = _require_node_tree(scene)
-        nodes = [{"name": node.name, "type": node.bl_idname} for node in node_tree.nodes]
-        links = []
-        for link in node_tree.links:
-            links.append(
-                {
-                    "from_node": link.from_node.name,
-                    "from_socket": link.from_socket.name,
-                    "to_node": link.to_node.name,
-                    "to_socket": link.to_socket.name,
-                }
-            )
-        return {"nodes": nodes, "links": links, "count": len(nodes)}
-
-    if method == "add_compositor_node":
-        scene = bpy.context.scene
-        node_tree = _require_node_tree(scene)
-
-        node_type = params.get("node_type")
-        node_name = params.get("node_name")
-        if not isinstance(node_type, str) or not node_type:
-            raise ValueError("node_type must be a non-empty string")
-
-        node = node_tree.nodes.new(node_type)
-        if isinstance(node_name, str) and node_name:
-            node.name = node_name
-
-        return {"node": {"name": node.name, "type": node.bl_idname}}
-
-    if method == "link_compositor_nodes":
-        scene = bpy.context.scene
-        node_tree = _require_node_tree(scene)
-
-        from_node_name = params.get("from_node")
-        from_socket_name = params.get("from_socket")
-        to_node_name = params.get("to_node")
-        to_socket_name = params.get("to_socket")
-
-        for field_name, value in (
-            ("from_node", from_node_name),
-            ("from_socket", from_socket_name),
-            ("to_node", to_node_name),
-            ("to_socket", to_socket_name),
-        ):
-            if not isinstance(value, str) or not value:
-                raise ValueError(f"{field_name} must be a non-empty string")
-
-        from_node = node_tree.nodes.get(from_node_name)
-        to_node = node_tree.nodes.get(to_node_name)
-        if from_node is None:
-            raise ValueError(f"Node not found: {from_node_name}")
-        if to_node is None:
-            raise ValueError(f"Node not found: {to_node_name}")
-
-        from_socket = from_node.outputs.get(from_socket_name)
-        to_socket = to_node.inputs.get(to_socket_name)
-        if from_socket is None:
-            raise ValueError(f"Socket not found: {from_node_name}.{from_socket_name}")
-        if to_socket is None:
-            raise ValueError(f"Socket not found: {to_node_name}.{to_socket_name}")
-
-        node_tree.links.new(from_socket, to_socket)
-        return {
-            "linked": {
-                "from_node": from_node.name,
-                "from_socket": from_socket.name,
-                "to_node": to_node.name,
-                "to_socket": to_socket.name,
-            }
-        }
-
-    if method == "set_view_layer_passes":
-        view_layer_name = params.get("view_layer_name")
-        resolved_view_layer_name = view_layer_name if isinstance(view_layer_name, str) else None
-        view_layer = _require_view_layer(resolved_view_layer_name)
-
-        requested_passes = {
-            "use_pass_z": params.get("use_pass_z"),
-            "use_pass_normal": params.get("use_pass_normal"),
-            "use_pass_vector": params.get("use_pass_vector"),
-            "use_pass_diffuse_color": params.get("use_pass_diffuse_color"),
-            "use_pass_glossy_color": params.get("use_pass_glossy_color"),
-            "use_pass_emit": params.get("use_pass_emit"),
-            "use_pass_ambient_occlusion": params.get("use_pass_ambient_occlusion"),
-        }
-
-        applied: dict[str, bool] = {}
-        unsupported: list[str] = []
-        for attr_name, raw_value in requested_passes.items():
-            if not isinstance(raw_value, bool):
-                continue
-
-            if hasattr(view_layer, attr_name):
-                setattr(view_layer, attr_name, raw_value)
-                applied[attr_name] = bool(getattr(view_layer, attr_name))
-            else:
-                unsupported.append(attr_name)
-
-        return {
-            "view_layer_name": view_layer.name,
-            "applied": applied,
-            "unsupported": unsupported,
-        }
-
-    if method == "set_viewport_view":
-        if bpy.app.background:
-            raise ValueError("Viewport view controls are unavailable in background mode")
-
-        context = _find_view3d_context()
-        if context is None:
-            raise ValueError("No VIEW_3D viewport context available (likely headless mode)")
-
-        window, area, region, space, region_3d = context
-        view = params.get("view")
-        location = params.get("location")
-        rotation_quaternion = params.get("rotation_quaternion")
-        distance = params.get("distance")
-        lens = params.get("lens")
-        shading_type = params.get("shading_type")
-
-        if isinstance(view, str) and view:
-            view_upper = view.upper()
-            with bpy.context.temp_override(window=window, area=area, region=region):
-                if view_upper in {"FRONT", "BACK", "LEFT", "RIGHT", "TOP", "BOTTOM"}:
-                    bpy.ops.view3d.view_axis(type=view_upper, align_active=False)
-                elif view_upper == "CAMERA":
-                    bpy.ops.view3d.view_camera()
-                elif view_upper == "PERSP":
-                    region_3d.view_perspective = "PERSP"
-                elif view_upper == "ORTHO":
-                    region_3d.view_perspective = "ORTHO"
-                else:
-                    raise ValueError(
-                        "view must be one of FRONT/BACK/LEFT/RIGHT/TOP/BOTTOM/CAMERA/PERSP/ORTHO"
-                    )
-
-        if "location" in params:
-            region_3d.view_location = _to_vector3(location, "location")
-        if "rotation_quaternion" in params:
-            region_3d.view_rotation = Quaternion(
-                _to_quaternion(rotation_quaternion, "rotation_quaternion")
-            )
-        if isinstance(distance, (int, float)):
-            region_3d.view_distance = float(distance)
-        if isinstance(lens, (int, float)):
-            space.lens = float(lens)
-        if isinstance(shading_type, str) and hasattr(space, "shading"):
-            space.shading.type = shading_type.upper()
-
-        return {
-            "view_perspective": region_3d.view_perspective,
-            "view_location": [float(v) for v in region_3d.view_location],
-            "view_distance": float(region_3d.view_distance),
-            "view_rotation": [float(v) for v in region_3d.view_rotation],
-            "lens": float(space.lens),
-            "shading_type": space.shading.type if hasattr(space, "shading") else None,
-        }
-
-    if method == "capture_viewport_screenshot":
-        render = bpy.context.scene.render
-        previous = (render.image_settings.file_format, render.resolution_percentage)
-        render.image_settings.file_format = "PNG"
-        render.resolution_percentage = 100
-        params = {**params, "filepath": str(Path(params["filepath"]).with_suffix(".png"))}
-        try:
-            result = _capture_viewport(params)
-        finally:
-            render.image_settings.file_format, render.resolution_percentage = previous
-        path = Path(result["filepath"])
-        if path.stat().st_size <= 8 * 1024 * 1024:
-            result["image"] = {
-                "mime_type": "image/png",
-                "data": base64.b64encode(path.read_bytes()).decode("ascii"),
-            }
-        else:
-            result["image_error"] = (
-                "Image exceeds 8 MiB; reduce capture resolution for inline preview"
-            )
-        return result
-
-    if method == "workflow_setup_studio":
-        object_name = params.get("object_name", "Subject")
-        primitive = params.get("primitive", "CUBE")
-        add_ground = bool(params.get("add_ground", True))
-        camera_name = params.get("camera_name", "WorkflowCamera")
-        key_energy = float(params.get("key_energy", 1200.0))
-        fill_energy = float(params.get("fill_energy", 600.0))
-        rim_energy = float(params.get("rim_energy", 900.0))
-        camera_distance = float(params.get("camera_distance", 6.0))
-        camera_height = float(params.get("camera_height", 3.0))
-
-        if not isinstance(object_name, str) or not object_name:
-            raise ValueError("object_name must be a non-empty string")
-        if not isinstance(primitive, str) or not primitive:
-            raise ValueError("primitive must be a non-empty string")
-        if not isinstance(camera_name, str) or not camera_name:
-            raise ValueError("camera_name must be a non-empty string")
-
-        subject = _ensure_subject_object(
-            object_name=object_name,
-            primitive=primitive,
-            size=float(params.get("size", 2.0)),
-        )
-
-        target = Vector(subject.location)
-        camera_location = target + Vector((0.0, -camera_distance, camera_height))
-        camera = bpy.data.objects.get(camera_name)
-        if camera is None or camera.type != "CAMERA":
-            camera_data = bpy.data.cameras.new(f"{camera_name}Data")
-            camera = bpy.data.objects.new(camera_name, camera_data)
-            bpy.context.scene.collection.objects.link(camera)
-        camera.location = camera_location
-        direction = target - camera.location
-        if direction.length > 0:
-            camera.rotation_euler = direction.to_track_quat("-Z", "Y").to_euler()
-        bpy.context.scene.camera = camera
-
-        key = _create_or_update_light(
-            name="WorkflowKeyLight",
-            light_type="AREA",
-            energy=key_energy,
-            location=tuple(
-                target + Vector((camera_distance * 0.8, -camera_distance * 0.8, camera_height))
-            ),
-        )
-        fill = _create_or_update_light(
-            name="WorkflowFillLight",
-            light_type="AREA",
-            energy=fill_energy,
-            location=tuple(
-                target
-                + Vector((-camera_distance * 0.8, -camera_distance * 0.5, camera_height * 0.7))
-            ),
-        )
-        rim = _create_or_update_light(
-            name="WorkflowRimLight",
-            light_type="AREA",
-            energy=rim_energy,
-            location=tuple(target + Vector((0.0, camera_distance * 0.9, camera_height))),
-        )
-
-        ground_name = "WorkflowGround"
-        if add_ground:
-            ground = bpy.data.objects.get(ground_name)
-            if ground is None:
-                bpy.ops.mesh.primitive_plane_add(size=20.0, location=(0.0, 0.0, 0.0))
-                ground = bpy.context.active_object
-                if ground is not None:
-                    ground.name = ground_name
-            if ground is not None:
-                ground.location.z = float(subject.location.z - subject.dimensions.z * 0.5)
-
-        return {
-            "subject": _serialize_object(subject),
-            "camera": _serialize_object(camera),
-            "lights": [key.name, fill.name, rim.name],
-            "ground": ground_name if add_ground else None,
-        }
-
-    if method == "workflow_create_turntable":
-        object_name = params.get("object_name")
-        frame_start = int(params.get("frame_start", 1))
-        frame_end = int(params.get("frame_end", 120))
-        rotations = float(params.get("rotations", 1.0))
-        axis = params.get("axis", "Z")
-
-        obj = _require_object(object_name)
-        if not isinstance(axis, str) or axis.upper() not in {"X", "Y", "Z"}:
-            raise ValueError("axis must be one of X, Y, Z")
-
-        axis_index = {"X": 0, "Y": 1, "Z": 2}[axis.upper()]
-        scene = bpy.context.scene
-        scene.frame_start = frame_start
-        scene.frame_end = frame_end
-
-        start_rotation = [float(v) for v in obj.rotation_euler]
-        end_rotation = start_rotation.copy()
-        end_rotation[axis_index] = start_rotation[axis_index] + (2.0 * math.pi * rotations)
-
-        scene.frame_set(frame_start)
-        obj.rotation_euler = tuple(start_rotation)
-        obj.keyframe_insert(data_path="rotation_euler", frame=frame_start)
-        scene.frame_set(frame_end)
-        obj.rotation_euler = tuple(end_rotation)
-        obj.keyframe_insert(data_path="rotation_euler", frame=frame_end)
-
-        action_name: str | None = None
-        if obj.animation_data is not None and obj.animation_data.action is not None:
-            action_name = obj.animation_data.action.name
-        return {
-            "object_name": obj.name,
-            "axis": axis.upper(),
-            "rotations": rotations,
-            "frame_start": scene.frame_start,
-            "frame_end": scene.frame_end,
-            "action": action_name,
-        }
-
-    if method == "workflow_turntable_render":
-        object_name = params.get("object_name", "Subject")
-        output_path = _normalize_path(params.get("output_path"), require_exists=False)
-        frame_start = int(params.get("frame_start", 1))
-        frame_end = int(params.get("frame_end", 120))
-        resolution_x = int(params.get("resolution_x", 512))
-        resolution_y = int(params.get("resolution_y", 512))
-        setup_studio = bool(params.get("setup_studio", True))
-
-        if setup_studio:
-            _dispatch_command(
-                "workflow_setup_studio",
-                {
-                    "object_name": object_name,
-                    "primitive": params.get("primitive", "CUBE"),
-                    "add_ground": params.get("add_ground", True),
-                    "size": params.get("size", 2.0),
-                },
-            )
-
-        _dispatch_command(
-            "workflow_create_turntable",
-            {
-                "object_name": object_name,
-                "frame_start": frame_start,
-                "frame_end": frame_end,
-                "rotations": params.get("rotations", 1.0),
-                "axis": params.get("axis", "Z"),
-            },
-        )
-
-        scene = bpy.context.scene
-        engine = params.get("engine")
-        if isinstance(engine, str) and engine:
-            scene.render.engine = engine
-        scene.render.resolution_x = resolution_x
-        scene.render.resolution_y = resolution_y
-        if (
-            isinstance(params.get("samples"), int)
-            and params.get("samples") > 0
-            and hasattr(scene, "cycles")
-        ):
-            scene.cycles.samples = int(params.get("samples"))
-
-        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-        scene.render.filepath = output_path
-        bpy.ops.render.render(animation=True)
-        return {
-            "rendered": True,
-            "object_name": object_name,
-            "filepath": output_path,
-            "frame_start": scene.frame_start,
-            "frame_end": scene.frame_end,
-            "engine": scene.render.engine,
-        }
-
-    if method == "render_still":
-        filepath = _normalize_path(params.get("filepath"), require_exists=False)
-        Path(filepath).parent.mkdir(parents=True, exist_ok=True)
-
-        scene = bpy.context.scene
-        engine = params.get("engine")
-        if isinstance(engine, str) and engine:
-            scene.render.engine = engine
-
-        resolution_x = params.get("resolution_x")
-        resolution_y = params.get("resolution_y")
-        if isinstance(resolution_x, int) and resolution_x > 0:
-            scene.render.resolution_x = resolution_x
-        if isinstance(resolution_y, int) and resolution_y > 0:
-            scene.render.resolution_y = resolution_y
-
-        samples = params.get("samples")
-        if isinstance(samples, int) and samples > 0 and hasattr(scene, "cycles"):
-            scene.cycles.samples = samples
-
-        scene.render.filepath = filepath
-        bpy.ops.render.render(write_still=True)
-        return {"rendered": True, "filepath": filepath, "engine": scene.render.engine}
-
-    if method == "render_animation":
-        filepath = _normalize_path(params.get("filepath"), require_exists=False)
-        Path(filepath).parent.mkdir(parents=True, exist_ok=True)
-
-        scene = bpy.context.scene
-        engine = params.get("engine")
-        frame_start = params.get("frame_start")
-        frame_end = params.get("frame_end")
-
-        if isinstance(engine, str) and engine:
-            scene.render.engine = engine
-        if isinstance(frame_start, int):
-            scene.frame_start = frame_start
-        if isinstance(frame_end, int):
-            scene.frame_end = frame_end
-
-        scene.render.filepath = filepath
-        bpy.ops.render.render(animation=True)
-        return {
-            "rendered": True,
-            "filepath": filepath,
-            "engine": scene.render.engine,
-            "frame_start": scene.frame_start,
-            "frame_end": scene.frame_end,
-        }
-
-    if method == "import_file":
-        filepath = _normalize_path(params.get("filepath"), require_exists=True)
-        file_type = _resolve_file_type(filepath, params.get("file_type"))
-
-        if file_type == "OBJ":
-            bpy.ops.wm.obj_import(filepath=filepath)
-        elif file_type == "FBX":
-            bpy.ops.import_scene.fbx(filepath=filepath)
-        elif file_type == "GLTF":
-            bpy.ops.import_scene.gltf(filepath=filepath)
-        else:
-            bpy.ops.wm.usd_import(filepath=filepath)
-
-        objects_total = len(bpy.context.scene.objects)
-        return {
-            "imported": True,
-            "file_type": file_type,
-            "objects_total": objects_total,
-        }
-
-    if method == "export_file":
-        filepath = _normalize_path(params.get("filepath"), require_exists=False)
-        Path(filepath).parent.mkdir(parents=True, exist_ok=True)
-        file_type = _resolve_file_type(filepath, params.get("file_type"))
-        use_selection = bool(params.get("use_selection", False))
-
-        if file_type == "OBJ":
-            bpy.ops.wm.obj_export(filepath=filepath, export_selected_objects=use_selection)
-        elif file_type == "FBX":
-            bpy.ops.export_scene.fbx(filepath=filepath, use_selection=use_selection)
-        elif file_type == "GLTF":
-            operator = bpy.ops.export_scene.gltf
-            selection_key = (
-                "use_selection"
-                if "use_selection" in operator.get_rna_type().properties
-                else "export_selected"
-            )
-            operator(
-                filepath=filepath,
-                **{selection_key: use_selection},
-                export_format="GLB" if Path(filepath).suffix.lower() == ".glb" else "GLTF_SEPARATE",
-            )
-        else:
-            bpy.ops.wm.usd_export(filepath=filepath, selected_objects_only=use_selection)
-
-        return {"exported": True, "file_type": file_type, "filepath": filepath}
-
-    if method == "list_collections":
-        collections = [
-            {"name": collection.name, "objects_total": len(collection.objects)}
-            for collection in bpy.data.collections
-        ]
-        return {"collections": collections, "count": len(collections)}
-
-    if method == "create_collection":
-        name = params.get("name")
-        parent_name = params.get("parent_name")
-        link_to_scene = bool(params.get("link_to_scene", True))
-
-        if not isinstance(name, str) or not name:
-            raise ValueError("name must be a non-empty string")
-
-        if bpy.data.collections.get(name) is not None:
-            raise ValueError(f"Collection already exists: {name}")
-
-        collection = bpy.data.collections.new(name)
-        if isinstance(parent_name, str) and parent_name:
-            parent = _require_collection(parent_name)
-            parent.children.link(collection)
-        elif link_to_scene:
-            bpy.context.scene.collection.children.link(collection)
-
-        return {"collection": {"name": collection.name, "objects_total": len(collection.objects)}}
-
-    if method == "add_object_to_collection":
-        object_name = params.get("object_name")
-        collection_name = params.get("collection_name")
-        unlink_from_others = bool(params.get("unlink_from_others", False))
-
-        obj = _require_object(object_name)
-        collection = _require_collection(collection_name)
-
-        if obj.name not in collection.objects:
-            collection.objects.link(obj)
-
-        if unlink_from_others:
-            for candidate in bpy.data.collections:
-                if candidate.name != collection.name and obj.name in candidate.objects:
-                    candidate.objects.unlink(obj)
-
-        return {
-            "object_name": obj.name,
-            "collection_name": collection.name,
-            "unlink_from_others": unlink_from_others,
-        }
-
-    if method == "remove_object_from_collection":
-        object_name = params.get("object_name")
-        collection_name = params.get("collection_name")
-        obj = _require_object(object_name)
-        collection = _require_collection(collection_name)
-
-        if obj.name not in collection.objects:
-            raise ValueError(f"Object {obj.name} is not linked to collection {collection.name}")
-
-        collection.objects.unlink(obj)
-        return {"object_name": obj.name, "collection_name": collection.name}
-
-    if method == "list_view_layers":
-        scene = bpy.context.scene
-        active = bpy.context.view_layer.name
-        layers = [{"name": view_layer.name} for view_layer in scene.view_layers]
-        return {"view_layers": layers, "active_view_layer": active, "count": len(layers)}
-
-    if method == "set_active_view_layer":
-        name = params.get("name")
-        if not isinstance(name, str) or not name:
-            raise ValueError("name must be a non-empty string")
-
-        view_layer = _require_view_layer(name)
-        window = bpy.context.window
-        if window is None:
-            raise RuntimeError("No active window available to set view layer")
-        window.view_layer = view_layer
-        return {"active_view_layer": view_layer.name}
-
-    if method == "set_collection_visibility":
-        collection_name = params.get("collection_name")
-        collection = _require_collection(collection_name)
-        view_layer_name = params.get("view_layer_name")
-        resolved_view_layer_name = view_layer_name if isinstance(view_layer_name, str) else None
-        view_layer = _require_view_layer(resolved_view_layer_name)
-
-        hide_viewport = params.get("hide_viewport")
-        hide_render = params.get("hide_render")
-        exclude = params.get("exclude")
-        holdout = params.get("holdout")
-        indirect_only = params.get("indirect_only")
-
-        layer_collection = _find_layer_collection(view_layer.layer_collection, collection.name)
-        if layer_collection is None:
-            raise ValueError(
-                f"Collection {collection.name} is not present in view layer {view_layer.name}"
-            )
-
-        if isinstance(hide_viewport, bool):
-            collection.hide_viewport = hide_viewport
-        if isinstance(hide_render, bool):
-            collection.hide_render = hide_render
-
-        if isinstance(exclude, bool):
-            layer_collection.exclude = exclude
-        if isinstance(holdout, bool):
-            layer_collection.holdout = holdout
-        if isinstance(indirect_only, bool):
-            layer_collection.indirect_only = indirect_only
-
-        return {
-            "collection_name": collection.name,
-            "view_layer_name": view_layer.name,
-            "hide_viewport": collection.hide_viewport,
-            "hide_render": collection.hide_render,
-            "exclude": layer_collection.exclude,
-            "holdout": layer_collection.holdout,
-            "indirect_only": layer_collection.indirect_only,
         }
 
     if method == "execute_code":
@@ -2576,85 +1035,7 @@ def _dispatch_command(method: str, params: dict[str, Any]) -> dict[str, Any]:
 
 
 def _supported_methods() -> list[str]:
-    return [
-        "create_checkpoint",
-        "list_checkpoints",
-        "restore_checkpoint",
-        "run_with_checkpoint",
-        "start_render_job",
-        "list_jobs",
-        "get_job_image",
-        "get_job_status",
-        "cancel_job",
-        "health",
-        "new_scene",
-        "open_blend",
-        "save_blend",
-        "get_scene_info",
-        "set_timeline",
-        "get_node_info",
-        "list_objects",
-        "get_object_info",
-        "create_primitive",
-        "delete_object",
-        "set_object_transform",
-        "duplicate_object",
-        "keyframe_transform",
-        "insert_keyframe",
-        "list_animation_data",
-        "list_actions",
-        "create_action",
-        "set_active_action",
-        "push_down_action",
-        "clear_animation_data",
-        "duplicate_action",
-        "delete_action",
-        "list_nla_tracks",
-        "create_nla_strip",
-        "set_nla_strip",
-        "remove_nla_strip",
-        "create_geometry_nodes_modifier",
-        "list_geometry_nodes",
-        "add_geometry_node",
-        "link_geometry_nodes",
-        "add_geometry_input",
-        "list_geometry_inputs",
-        "set_geometry_input",
-        "add_modifier",
-        "list_modifiers",
-        "apply_modifier",
-        "remove_modifier",
-        "add_constraint",
-        "list_constraints",
-        "remove_constraint",
-        "create_material",
-        "assign_material",
-        "create_camera",
-        "set_active_camera",
-        "create_light",
-        "enable_compositor",
-        "list_compositor_nodes",
-        "add_compositor_node",
-        "link_compositor_nodes",
-        "set_view_layer_passes",
-        "set_viewport_view",
-        "capture_viewport_screenshot",
-        "workflow_setup_studio",
-        "workflow_create_turntable",
-        "workflow_turntable_render",
-        "render_still",
-        "render_animation",
-        "import_file",
-        "export_file",
-        "list_collections",
-        "create_collection",
-        "add_object_to_collection",
-        "remove_object_from_collection",
-        "list_view_layers",
-        "set_active_view_layer",
-        "set_collection_visibility",
-        "execute_code",
-    ]
+    return sorted(SCHEMAS)
 
 
 @bpy.app.handlers.persistent
@@ -2672,6 +1053,15 @@ def _sync_document(runtime):
 
 
 def _finish_command(runtime, command, response, state="completed"):
+    try:
+        json.dumps(response, allow_nan=False)
+    except (ValueError, TypeError):
+        response = {
+            "id": command.request_id,
+            "ok": False,
+            "error": "Result cannot be serialized",
+            "code": "INVALID_RESULT",
+        }
     if command.tracked:
         runtime.ledger.update(command.request_id, state, response)
     command.state = state
@@ -2721,11 +1111,15 @@ def _drain_command_queue() -> float | None:
             if command.tracked:
                 runtime.ledger.update(command.request_id, "running")
             command.state = "running"
+        started = time.monotonic()
         try:
             result = _dispatch_command(command.method, command.params)
             response = {"id": command.request_id, "ok": True, "result": result}
         except Exception as exc:
             response = {"id": command.request_id, "ok": False, "error": str(exc)}
+        runtime.diagnostics.record(
+            command.request_id, command.method, response, time.monotonic() - started, "execution"
+        )
         _sync_document(runtime)
         with command.lock:
             _finish_command(runtime, command, response)
@@ -2813,6 +1207,7 @@ def start_bridge_with_config(
     runtime.render_jobs = RenderJobs(state_directory() / "jobs" / namespace)
     runtime.ledger = RequestLedger(state_directory() / "requests" / (namespace + ".sqlite3"))
     runtime.scene_pointer = bpy.context.scene.as_pointer()
+    runtime.diagnostics = Diagnostics(state_directory() / "logs" / (namespace + ".jsonl"))
     thread = threading.Thread(
         target=server.serve_forever,
         name="better-blender-bridge",
@@ -2841,7 +1236,8 @@ def stop_bridge() -> None:
         return
 
     runtime = _RUNTIME
-    runtime.running = False
+    with runtime.admission_lock:
+        runtime.running = False
     if _document_loaded in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.remove(_document_loaded)
     while runtime.command_queue is not None:
