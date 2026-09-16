@@ -40,6 +40,7 @@ def test_doctor_checks_bridge_compatibility(monkeypatch, capsys):
             "bridge_running": True,
             "capabilities": {
                 "render_jobs": True,
+                "render_supervision": True,
                 "inline_images": True,
                 "strict_inputs": True,
                 "checkpoints": True,
@@ -107,6 +108,7 @@ def test_doctor_detects_stale_addon(monkeypatch, capsys):
         "node_inspection",
         "persistent_jobs",
         "render_jobs",
+        "render_supervision",
         "strict_inputs",
     ]
 

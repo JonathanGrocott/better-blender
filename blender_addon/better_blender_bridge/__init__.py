@@ -16,7 +16,6 @@ import shutil
 import socketserver
 import sqlite3
 import sys
-import tempfile
 import threading
 import time
 import uuid
@@ -48,7 +47,7 @@ from .validation import SCHEMAS, validate_command
 bl_info = {
     "name": "Better Blender Bridge",
     "author": "Better Blender Contributors",
-    "version": (0, 5, 0),
+    "version": (0, 5, 1),
     "blender": (3, 4, 1),
     "location": "View3D > Sidebar > Better Blender",
     "description": "Local bridge for Better Blender MCP",
@@ -961,7 +960,7 @@ def _dispatch_command(method: str, params: dict[str, Any]) -> dict[str, Any]:
                 _normalize_path(render_params[key], require_exists=False)
         if _RUNTIME is None:
             raise ValueError("Bridge runtime unavailable")
-        directory = Path(tempfile.mkdtemp(prefix="better-blender-render-"))
+        directory = _RUNTIME.render_jobs.create_workspace()
         try:
             snapshot = directory / "scene.blend"
             # Capture dependencies with absolute paths without changing the user's file.
@@ -998,6 +997,7 @@ def _dispatch_command(method: str, params: dict[str, Any]) -> dict[str, Any]:
             "protocol_version": 1,
             "capabilities": {
                 "render_jobs": True,
+                "render_supervision": True,
                 "inline_images": True,
                 "strict_inputs": True,
                 "checkpoints": True,

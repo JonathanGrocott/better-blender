@@ -119,3 +119,36 @@ The latter needs Blender and a display for the GUI test (Xvfb works on Linux).
 CI exercises Blender 3.4.1, 4.2.0 and 5.0.1, plus Python and packaging on Linux,
 macOS and Windows. Failure tests cover duplicate admission, response loss,
 restart replay, stale queued edits, shutdown, retention and access restrictions.
+
+## Render and bridge lifecycle (0.5.1)
+
+Render jobs have a separate **Render Runtime Limit** in add-on preferences,
+independent of the socket request timeout. The default is one hour; restart the
+bridge after changing it. Programmatic startup accepts `render_timeout_seconds`.
+A render that exceeds this limit ends as `timed_out`, with already-written outputs
+left intact. Job status includes the configured limit.
+
+A small supervisor runs under Blender's bundled Python interpreter. It records
+admission before launching Blender and owns the worker until it exits. Cancellation,
+deadlines and bridge connection loss trigger termination, escalating to a kill
+after two seconds if needed. Cancellation does not require a writable job store.
+If the bridge process crashes, its control pipe closes and the supervisor stops
+the worker, records `interrupted` where storage permits, and removes its workspace.
+This assumes the supervisor and OS remain operational; it is not protection against
+arbitrary supervisor termination or a machine failure.
+
+Temporary render snapshots live under the endpoint's job storage. Restart cleans
+abandoned directories, including partial snapshots left before launch. Cross-process
+leases protect directories still owned by a supervisor. Small lease files remain
+to avoid races from replacing lock-file identities. Caller-owned render outputs
+are never removed by this cleanup.
+
+If saving a terminal result fails, the bridge reports a failed job and, when
+applicable, a `persistence_error`; the supervisor still stops/reaps the worker and
+cleans its workspace. Inspect any output files before submitting a new render.
+
+Startup failures roll back the listener, timer, file-load callback, database and
+log handles. Shutdown expires queued commands, stops render workers, waits for
+request handlers, then closes the database and logging resources. Fault tests
+cover failed admission, watcher startup, terminal persistence, unresponsive workers,
+owner-process crashes, startup rollback and repeated start/stop cycles.

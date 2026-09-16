@@ -111,6 +111,7 @@ def _run_doctor() -> int:
         capabilities = status.get("capabilities", {})
         required = {
             "render_jobs",
+            "render_supervision",
             "inline_images",
             "strict_inputs",
             "checkpoints",

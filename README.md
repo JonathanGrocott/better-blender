@@ -133,3 +133,11 @@ sides use the same protocol and schemas.
 
 See [Operations](docs/operations.md) for retry semantics, migration from the old
 `change-me` token, storage limits and the scope of path/asset checks.
+
+### Lifecycle reliability (0.5.1)
+
+Render workers now have independent supervision, a configurable runtime limit
+(default one hour), and cleanup after bridge crashes. Failed job admission starts
+no worker; cancellation remains available during storage failures. Bridge startup
+rolls back partial initialization, and shutdown closes database/log resources after
+request handlers finish. See [Operations](docs/operations.md#render-and-bridge-lifecycle-051).

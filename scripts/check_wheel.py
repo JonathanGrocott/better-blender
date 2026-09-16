@@ -64,6 +64,8 @@ with tempfile.TemporaryDirectory(prefix="bb-wheel-") as work:
         "schemas.json",
         "jobs.py",
         "render_worker.py",
+        "render_supervisor.py",
+        "workspaces.py",
         "checkpoints.py",
         "storage.py",
         "inspection.py",

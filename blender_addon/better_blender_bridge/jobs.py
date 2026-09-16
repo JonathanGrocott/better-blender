@@ -13,6 +13,7 @@ import uuid
 from pathlib import Path
 
 from .storage import write_json
+from .workspaces import lease
 
 
 class RenderJobs:
@@ -40,6 +41,29 @@ class RenderJobs:
                     continue
 
         self.jobs = dict(sorted(self.jobs.items(), key=lambda item: item[1]["created_at"]))
+        if self.storage:
+            for directory in (self.storage / "workspaces").glob("*"):
+                if (
+                    directory.is_symlink()
+                    or not directory.is_dir()
+                    or directory.name.startswith(".")
+                ):
+                    continue
+                # A previous supervisor owns its directory until its worker is reaped.
+                with lease(directory) as acquired:
+                    if acquired:
+                        shutil.rmtree(directory, ignore_errors=True)
+
+    def create_workspace(self):
+        with self.lock:
+            if self.closed:
+                raise ValueError("Render manager is closed")
+            if self.storage is None:
+                self._temporary_storage = tempfile.TemporaryDirectory(prefix="bb-job-history-")
+                self.storage = Path(self._temporary_storage.name)
+            directory = self.storage / "workspaces" / uuid.uuid4().hex
+            directory.mkdir(parents=True)
+            return directory
 
     def _persist(self, job):
         if self.storage:
