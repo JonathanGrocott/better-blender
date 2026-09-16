@@ -13,15 +13,19 @@ class RequestLedger:
         self.lock = threading.RLock()
         self.capacity = capacity
         self.db = sqlite3.connect(str(path), check_same_thread=False)
-        self.db.execute("PRAGMA synchronous=FULL")
-        self.db.execute(
-            "CREATE TABLE IF NOT EXISTS requests "
-            "(id TEXT PRIMARY KEY, fingerprint TEXT, state TEXT, response TEXT, updated REAL)"
-        )
-        with self.db:
+        try:
+            self.db.execute("PRAGMA synchronous=FULL")
             self.db.execute(
-                "UPDATE requests SET state='interrupted' WHERE state IN ('queued', 'running')"
+                "CREATE TABLE IF NOT EXISTS requests "
+                "(id TEXT PRIMARY KEY, fingerprint TEXT, state TEXT, response TEXT, updated REAL)"
             )
+            with self.db:
+                self.db.execute(
+                    "UPDATE requests SET state='interrupted' WHERE state IN ('queued', 'running')"
+                )
+        except Exception:
+            self.db.close()
+            raise
 
     def admit(self, identifier, method, params):
         fingerprint = hashlib.sha256(

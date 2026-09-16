@@ -1023,3 +1023,88 @@ finally:
         env={**os.environ, "BETTER_BLENDER_STATE_DIR": str(tmp_path / "state")},
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_startup_rollback_and_repeated_shutdown(tmp_path):
+    blender = _find_blender_executable()
+    if blender is None:
+        pytest.skip("Blender executable not available")
+    addon_parent = Path(__file__).resolve().parents[2] / "blender_addon"
+    code = (
+        f"import sys; sys.path.insert(0, {str(addon_parent)!r})\n"
+        + r"""
+import socket, sqlite3, threading, time
+import bpy
+import better_blender_bridge as bridge
+with socket.socket() as probe:
+    probe.bind(('127.0.0.1', 0))
+    port = probe.getsockname()[1]
+original_ledger = bridge.RequestLedger
+original_diagnostics = bridge.Diagnostics
+original_timer = bridge._register_timer_if_needed
+original_start = threading.Thread.start
+ledgers, logs = [], []
+def capture_ledger(*args, **kwargs):
+    value = original_ledger(*args, **kwargs)
+    ledgers.append(value)
+    return value
+def capture_diagnostics(*args, **kwargs):
+    value = original_diagnostics(*args, **kwargs)
+    logs.append(value)
+    return value
+def fail(*args, **kwargs):
+    raise OSError('injected startup failure')
+for failure in ['ledger', 'diagnostics', 'timer', 'thread']:
+    bridge.RequestLedger = fail if failure == 'ledger' else capture_ledger
+    bridge.Diagnostics = fail if failure == 'diagnostics' else capture_diagnostics
+    bridge._register_timer_if_needed = fail if failure == 'timer' else original_timer
+    threading.Thread.start = fail if failure == 'thread' else original_start
+    try:
+        bridge.start_bridge_with_config('127.0.0.1', port, 'test')
+        raise AssertionError('Startup should fail')
+    except OSError as exc:
+        assert 'injected' in str(exc)
+    finally:
+        threading.Thread.start = original_start
+    assert bridge._RUNTIME is None
+    assert not bpy.app.timers.is_registered(bridge._drain_command_queue)
+    assert bridge._document_loaded not in bpy.app.handlers.load_post
+    with socket.socket() as probe:
+        probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        probe.bind(('127.0.0.1', port))
+bridge.RequestLedger = capture_ledger
+bridge.Diagnostics = capture_diagnostics
+bridge._register_timer_if_needed = original_timer
+for _ in range(3):
+    bridge.start_bridge_with_config('127.0.0.1', port, 'test')
+    runtime = bridge._RUNTIME
+    bridge.stop_bridge()
+    bridge.stop_bridge()
+    assert not runtime.thread.is_alive()
+for ledger in ledgers:
+    try:
+        ledger.status('test')
+        raise AssertionError('Database remained open')
+    except sqlite3.ProgrammingError:
+        pass
+for log in logs:
+    assert log.closed and log.handler.stream is None
+    assert not log.logger.handlers
+"""
+    )
+    result = subprocess.run(
+        [
+            blender,
+            "--background",
+            "--factory-startup",
+            "--python-exit-code",
+            "1",
+            "--python-expr",
+            code,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        env={**os.environ, "BETTER_BLENDER_STATE_DIR": str(tmp_path / "state")},
+    )
+    assert result.returncode == 0, result.stdout + result.stderr

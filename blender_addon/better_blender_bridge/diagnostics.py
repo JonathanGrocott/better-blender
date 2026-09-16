@@ -12,6 +12,7 @@ class Diagnostics:
     def __init__(self, path):
         path.parent.mkdir(parents=True, exist_ok=True)
         self.path = path
+        self.closed = False
         self.lock = threading.Lock()
         self.counts = Counter()
         self.failures = deque(maxlen=50)
@@ -35,6 +36,8 @@ class Diagnostics:
             "duration_ms": round(duration * 1000, 3),
         }
         with self.lock:
+            if self.closed:
+                return
             self.counts[phase] += 1
             if not event["ok"]:
                 self.counts["failures"] += 1
@@ -56,4 +59,7 @@ class Diagnostics:
             }
 
     def close(self):
-        self.handler.close()
+        with self.lock:
+            self.closed = True
+            self.logger.removeHandler(self.handler)
+            self.handler.close()

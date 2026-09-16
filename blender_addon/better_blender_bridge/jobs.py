@@ -2,8 +2,11 @@
 
 import base64
 import json
+import math
 import shutil
 import subprocess
+import sys
+import tempfile
 import threading
 import time
 import uuid
@@ -13,7 +16,11 @@ from .storage import write_json
 
 
 class RenderJobs:
-    def __init__(self, storage=None):
+    def __init__(self, storage=None, timeout_seconds=3600):
+        if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
+            raise ValueError("Render timeout must be finite and positive")
+        self.timeout_seconds = timeout_seconds
+        self._temporary_storage = None
         self.lock = threading.RLock()
         self.jobs = {}
         self.closed = False
@@ -24,7 +31,7 @@ class RenderJobs:
             for path in self.storage.glob("*.json"):
                 try:
                     job = json.loads(path.read_text())
-                    if job["state"] in {"running", "cancelling"}:
+                    if job["state"] in {"queued", "running", "cancelling"}:
                         job.update(
                             state="interrupted", error="Bridge stopped before recording completion"
                         )
@@ -50,96 +57,130 @@ class RenderJobs:
             (self.storage / (key + ".json")).unlink(missing_ok=True)
 
     def submit(self, binary, snapshot, request, directory):
+        directory = Path(directory)
+        process = None
+        job_id = str(uuid.uuid4())
         with self.lock:
-            active = [j for j in self.jobs.values() if j["state"] in {"running", "cancelling"}]
-            if self.closed or len(active) >= 2:
-                raise ValueError("Render workers busy; wait for a job to finish")
-            # Keep at most 32 completed results, without deleting caller-owned outputs.
-            finished = [
-                key for key, j in self.jobs.items() if j["state"] not in {"running", "cancelling"}
-            ]
-            for key in finished[:-31]:
-                self._forget(key)
-            directory = Path(directory)
-            request_path = directory / "request.json"
-            result_path = directory / "result.json"
-            request_path.write_text(json.dumps(request))
-            log_path = directory / "worker.log"
-            with log_path.open("wb") as log:
-                process = subprocess.Popen(
-                    [
-                        binary,
-                        "--background",
-                        str(snapshot),
-                        "--disable-autoexec",
-                        "--python-exit-code",
-                        "1",
-                        "--python",
-                        str(Path(__file__).with_name("render_worker.py")),
-                        "--",
-                        str(request_path),
-                        str(result_path),
-                    ],
-                    stdout=log,
-                    stderr=subprocess.STDOUT,
-                )
-            job_id = str(uuid.uuid4())
-            self.jobs[job_id] = {
-                "job_id": job_id,
-                "state": "running",
-                "created_at": time.time(),
-                "result": None,
-                "error": None,
-                "process": process,
-                "_directory": directory,
-                "progress": {"frames_completed": 0, "fraction": None},
-            }
-            self._persist(self.jobs[job_id])
-            watcher = threading.Thread(target=self._watch, args=(job_id, directory), daemon=True)
-            self.watchers = [thread for thread in self.watchers if thread.is_alive()]
-            self.watchers.append(watcher)
-            watcher.start()
-            return self.status(job_id)
-
-    def _watch(self, job_id, directory):
-        process = self.jobs[job_id]["process"]
-        process.wait()
-        try:
-            result_path = directory / "result.json"
-            result = json.loads(result_path.read_text()) if result_path.exists() else None
-            with (directory / "worker.log").open("rb") as log:
-                log.seek(0, 2)
-                log.seek(max(0, log.tell() - 4096))
-                error = log.read().decode("utf-8", errors="replace")
-            with self.lock:
-                job = self.jobs[job_id]
-                if job["state"] == "cancelling":
-                    job["state"] = "cancelled"
-                elif process.returncode == 0 and isinstance(result, dict):
-                    job["state"] = "completed"
-                    job["result"] = result
-                    job["progress"] = {
-                        "frames_completed": result.get("frames_written"),
-                        "fraction": 1.0,
-                    }
-                else:
-                    job["state"] = "failed"
-                    job["error"] = error or "Render worker exited without a result"
-                job["finished_at"] = time.time()
-                self._persist(job)
+            try:
+                active = [
+                    j
+                    for j in self.jobs.values()
+                    if j["state"] in {"queued", "running", "cancelling"}
+                ]
+                if self.closed or len(active) >= 2:
+                    raise ValueError("Render workers busy; wait for a job to finish")
                 finished = [
                     key
-                    for key, value in self.jobs.items()
-                    if value["state"] not in {"running", "cancelling"}
+                    for key, j in self.jobs.items()
+                    if j["state"] not in {"queued", "running", "cancelling"}
                 ]
-                for key in finished[:-32]:
+                for key in finished[:-31]:
                     self._forget(key)
-        except Exception as exc:
-            with self.lock:
-                self.jobs[job_id].update(state="failed", error=str(exc))
-                self._persist(self.jobs[job_id])
-        finally:
-            shutil.rmtree(directory, ignore_errors=True)
+                if self.storage is None:
+                    self._temporary_storage = tempfile.TemporaryDirectory(prefix="bb-job-history-")
+                    self.storage = Path(self._temporary_storage.name)
+                request_path = directory / "request.json"
+                request_path.write_text(json.dumps(request))
+                job = {
+                    "job_id": job_id,
+                    "state": "queued",
+                    "created_at": time.time(),
+                    "result": None,
+                    "error": None,
+                    "timeout_seconds": self.timeout_seconds,
+                    "progress": {"frames_completed": 0, "fraction": None},
+                    "_directory": directory,
+                }
+                # Failure to persist admission must never launch a process.
+                self._persist(job)
+                command = [
+                    binary,
+                    "--background",
+                    str(snapshot),
+                    "--disable-autoexec",
+                    "--python-exit-code",
+                    "1",
+                    "--python",
+                    str(Path(__file__).with_name("render_worker.py")),
+                    "--",
+                    str(request_path),
+                    str(directory / "result.json"),
+                ]
+                process = subprocess.Popen(
+                    [
+                        sys.executable,
+                        str(Path(__file__).with_name("render_supervisor.py")),
+                        str(directory),
+                        str(self.storage / (job_id + ".json")),
+                        str(self.timeout_seconds),
+                        *command,
+                    ],
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                job.update(state="running", process=process)
+                self.jobs[job_id] = job
+                watcher = threading.Thread(target=self._watch, args=(job_id,), daemon=True)
+                self.watchers = [thread for thread in self.watchers if thread.is_alive()]
+                watcher.start()
+                self.watchers.append(watcher)
+                return self.status(job_id)
+            except Exception:
+                if process is not None:
+                    self._stop_process(process)
+                    # Supervisor owns worker termination; do not kill it before it reaps Blender.
+                    process.wait()
+                self.jobs.pop(job_id, None)
+                if self.storage:
+                    (self.storage / (job_id + ".json")).unlink(missing_ok=True)
+                shutil.rmtree(directory, ignore_errors=True)
+                raise
+
+    @staticmethod
+    def _stop_process(process):
+        if process.stdin is not None and not process.stdin.closed:
+            try:
+                process.stdin.write(b"cancel\n")
+                process.stdin.flush()
+            except (BrokenPipeError, OSError):
+                pass
+            finally:
+                try:
+                    process.stdin.close()
+                except OSError:
+                    pass
+
+    def _watch(self, job_id):
+        process = self.jobs[job_id]["process"]
+        process.wait()
+        with self.lock:
+            if process.stdin is not None:
+                process.stdin.close()
+            job = self.jobs[job_id]
+            try:
+                saved = json.loads((self.storage / (job_id + ".json")).read_text())
+                if saved["state"] in {"queued", "running", "cancelling"}:
+                    raise ValueError("Supervisor exited without a durable terminal result")
+                job.update(saved)
+            except (OSError, ValueError, KeyError) as exc:
+                job.update(state="failed", error=str(exc), finished_at=time.time())
+                try:
+                    self._persist(job)
+                except OSError as persist_error:
+                    job["persistence_error"] = str(persist_error)
+            finally:
+                shutil.rmtree(job["_directory"], ignore_errors=True)
+            finished = [
+                key
+                for key, value in self.jobs.items()
+                if value["state"] not in {"queued", "running", "cancelling"}
+            ]
+            for key in finished[:-32]:
+                try:
+                    self._forget(key)
+                except OSError:
+                    pass
 
     def status(self, job_id):
         with self.lock:
@@ -157,30 +198,14 @@ class RenderJobs:
         with self.lock:
             self.status(job_id)
             job = self.jobs[job_id]
-            if job["state"] not in {"running", "cancelling"}:
+            if job["state"] not in {"queued", "running", "cancelling"}:
                 return self.status(job_id)
-            process = job["process"]
-            if process.poll() is not None:
-                return self.status(job_id)  # The watcher will publish its actual result.
+            if job["process"].poll() is not None:
+                return self.status(job_id)
             job["state"] = "cancelling"
-            self._persist(job)
-            try:
-                process.terminate()
-            except ProcessLookupError:
-                pass
-
-        # Escalation happens outside the Blender main thread.
-        def ensure_stopped():
-            try:
-                process.wait(timeout=2)
-            except subprocess.TimeoutExpired:
-                try:
-                    process.kill()
-                except ProcessLookupError:
-                    pass
-
-        threading.Thread(target=ensure_stopped, daemon=True).start()
-        return self.status(job_id)
+            # Cancellation must work even if storage is full/unwritable.
+            self._stop_process(job["process"])
+            return self.status(job_id)
 
     def shutdown(self):
         with self.lock:
@@ -189,7 +214,11 @@ class RenderJobs:
         for job_id in ids:
             self.cancel(job_id)
         for watcher in self.watchers:
-            watcher.join(timeout=3)
+            watcher.join(timeout=10)
+            if watcher.is_alive():
+                raise RuntimeError("Render supervisor did not finish shutdown within 10 seconds")
+        if self._temporary_storage is not None:
+            self._temporary_storage.cleanup()
 
     def list_jobs(self, offset=0, limit=50):
         with self.lock:

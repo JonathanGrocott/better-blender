@@ -102,7 +102,7 @@ READ_TIMEOUT = 5.0
 
 class _BridgeTCPServer(socketserver.ThreadingTCPServer):
     allow_reuse_address = True
-    daemon_threads = True
+    daemon_threads = False
 
     def __init__(
         self,
@@ -1186,6 +1186,7 @@ def start_bridge(context: bpy.types.Context | None = None) -> None:
         read_only=prefs.read_only,
         allowed_roots=(prefs.allowed_directory,) if prefs.allowed_directory else (),
         allow_remote=prefs.allow_remote,
+        render_timeout_seconds=prefs.render_timeout_seconds,
         timeout_seconds=prefs.timeout_seconds,
         allow_unsafe_code=prefs.allow_unsafe_code,
         register_timer=True,
@@ -1202,6 +1203,7 @@ def start_bridge_with_config(
     read_only: bool = False,
     allowed_roots: tuple = (),
     allow_remote: bool = False,
+    render_timeout_seconds: float = 3600.0,
 ) -> None:
     global _RUNTIME
 
@@ -1230,40 +1232,45 @@ def start_bridge_with_config(
         command_queue=queue.Queue(maxsize=MAX_QUEUED_COMMANDS),
     )
 
-    server = _BridgeTCPServer((runtime.host, runtime.port), _BridgeRequestHandler, runtime)
-    namespace = hashlib.sha256(f"{host}:{server.server_address[1]}".encode()).hexdigest()[:16]
-    runtime.render_jobs = RenderJobs(state_directory() / "jobs" / namespace)
-    runtime.ledger = RequestLedger(state_directory() / "requests" / (namespace + ".sqlite3"))
-    runtime.scene_pointer = bpy.context.scene.as_pointer()
-    runtime.diagnostics = Diagnostics(state_directory() / "logs" / (namespace + ".jsonl"))
-    thread = threading.Thread(
-        target=server.serve_forever,
-        name="better-blender-bridge",
-        daemon=True,
-    )
-    runtime.server = server
-    runtime.thread = thread
+    try:
+        server = _BridgeTCPServer((runtime.host, runtime.port), _BridgeRequestHandler, runtime)
+        runtime.server = server
+        namespace = hashlib.sha256(f"{host}:{server.server_address[1]}".encode()).hexdigest()[:16]
+        runtime.render_jobs = RenderJobs(
+            state_directory() / "jobs" / namespace, timeout_seconds=render_timeout_seconds
+        )
+        runtime.ledger = RequestLedger(state_directory() / "requests" / (namespace + ".sqlite3"))
+        runtime.scene_pointer = bpy.context.scene.as_pointer()
+        runtime.diagnostics = Diagnostics(state_directory() / "logs" / (namespace + ".jsonl"))
+        thread = threading.Thread(
+            target=server.serve_forever, name="better-blender-bridge", daemon=True
+        )
+        runtime.thread = thread
+        _RUNTIME = runtime
+        if _document_loaded not in bpy.app.handlers.load_post:
+            bpy.app.handlers.load_post.append(_document_loaded)
+        if register_timer:
+            _register_timer_if_needed()
+        thread.start()
+    except Exception:
+        _dispose_runtime(runtime)
+        raise
 
-    _RUNTIME = runtime
-    if _document_loaded not in bpy.app.handlers.load_post:
-        bpy.app.handlers.load_post.append(_document_loaded)
-    if register_timer:
-        _register_timer_if_needed()
-    thread.start()
 
+def _dispose_runtime(runtime):
+    """Release every acquired resource, including partially initialized runtimes."""
+    global _RUNTIME, _TIMER_REGISTERED
+    errors = []
 
-def stop_bridge() -> None:
-    global _RUNTIME
-    global _TIMER_REGISTERED
+    def attempt(operation):
+        try:
+            operation()
+        except Exception as exc:
+            errors.append(exc)
 
     if bpy.app.timers.is_registered(_drain_command_queue):
-        bpy.app.timers.unregister(_drain_command_queue)
+        attempt(lambda: bpy.app.timers.unregister(_drain_command_queue))
     _TIMER_REGISTERED = False
-
-    if _RUNTIME is None:
-        return
-
-    runtime = _RUNTIME
     with runtime.admission_lock:
         runtime.running = False
     if _document_loaded in bpy.app.handlers.load_post:
@@ -1285,16 +1292,30 @@ def stop_bridge() -> None:
                 },
                 "expired",
             )
-    runtime.render_jobs.shutdown()
-
+    attempt(runtime.render_jobs.shutdown)
     if runtime.server is not None:
-        runtime.server.shutdown()
-        runtime.server.server_close()
-
+        # shutdown() waits forever if serve_forever never started.
+        if runtime.thread is not None and runtime.thread.is_alive():
+            attempt(runtime.server.shutdown)
+        # Non-daemon request threads finish before their shared DB/log handles close.
+        attempt(runtime.server.server_close)
     if runtime.thread is not None and runtime.thread.is_alive():
-        runtime.thread.join(timeout=1.0)
+        attempt(runtime.thread.join)
+    if runtime.ledger is not None:
+        attempt(runtime.ledger.close)
+    if runtime.diagnostics is not None:
+        attempt(runtime.diagnostics.close)
+    if _RUNTIME is runtime:
+        _RUNTIME = None
+    return errors
 
-    _RUNTIME = None
+
+def stop_bridge() -> None:
+    if _RUNTIME is None:
+        return
+    errors = _dispose_runtime(_RUNTIME)
+    if errors:
+        raise RuntimeError("Bridge cleanup encountered errors: " + "; ".join(map(str, errors)))
 
 
 class BetterBlenderPreferences(bpy.types.AddonPreferences):
@@ -1311,6 +1332,13 @@ class BetterBlenderPreferences(bpy.types.AddonPreferences):
     timeout_seconds: bpy.props.FloatProperty(
         name="Request Timeout", default=30.0, min=1.0, max=300.0
     )
+    render_timeout_seconds: bpy.props.FloatProperty(
+        name="Render Runtime Limit",
+        description="Maximum seconds per render job",
+        default=3600.0,
+        min=1.0,
+        max=604800.0,
+    )
     allow_unsafe_code: bpy.props.BoolProperty(
         name="Allow Unsafe Code Execution",
         description="Allow execute_code bridge method",
@@ -1324,6 +1352,7 @@ class BetterBlenderPreferences(bpy.types.AddonPreferences):
         layout.prop(self, "port")
         layout.prop(self, "token")
         layout.prop(self, "timeout_seconds")
+        layout.prop(self, "render_timeout_seconds")
         layout.prop(self, "allow_unsafe_code")
         layout.prop(self, "read_only")
         layout.prop(self, "allowed_directory")
