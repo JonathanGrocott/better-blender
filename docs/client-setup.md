@@ -8,15 +8,9 @@ This guide shows how to add `better-blender-mcp` to:
 
 ## Prerequisites
 
-1. Install this project and CLI:
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -e .[dev]
-```
-
-2. Install and enable the Blender add-on, then click **Start Bridge** in Blender.
+1. Install the wheel and matching add-on using the [release installation guide](installing-releases.md).
+   A source checkout is optional; developers can follow the README's developer quickstart.
+2. Enable the Blender add-on, then click **Start Bridge** in Blender.
 
 3. Installation generates a shared per-user token. Leave Blender’s **Token override**
 blank and use `print-config` to generate a client configuration. For an existing

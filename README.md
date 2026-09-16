@@ -24,6 +24,17 @@ This repository now includes:
   - Advanced: `execute_blender_code` (disabled by default, opt-in in add-on preferences)
 - Milestone and protocol docs for completing a production implementation.
 
+## Install a release (recommended)
+
+Download from [Latest release](https://github.com/JonathanGrocott/better-blender/releases/latest).
+The **Python wheel** installs the MCP server and includes the matching Blender
+add-on. The separate **add-on ZIP** is for manual Blender installation; GitHub's
+**Source code** archives are for developers.
+
+Follow [Installing a release](docs/installing-releases.md) for Windows/macOS/Linux
+instructions, checksum verification, client configuration, upgrades and rollback.
+No source checkout is needed.
+
 ## Quickstart (developer)
 
 ### 1) Install package and dev tools
@@ -70,6 +81,8 @@ better-blender-mcp doctor
 - Bridge and protocol specification: `docs/spec.md`
 - Blender API alignment map: `docs/blender-api-alignment.md`
 - Client setup guide: `docs/client-setup.md`
+- Release installation: [Installing a release](docs/installing-releases.md)
+- Maintainer release process: [Publishing a release](docs/releasing.md)
 
 ## Development checks
 ```bash
@@ -114,6 +127,8 @@ sides use the same protocol and schemas.
   the previous version if activation fails. Windows and macOS installation checks run in CI.
 - Successful CI runs publish **better-blender-distributions**, containing an unsigned
   wheel, Blender add-on ZIP, and SHA256SUMS. Download it from the run's Artifacts section.
+  These development artifacts expire after 30 days. Version tags also publish the
+  files to [GitHub Releases](https://github.com/JonathanGrocott/better-blender/releases).
   Build the same artifacts locally with `python scripts/build_artifacts.py`.
 - CI launches a real Blender window under Xvfb for all supported Blender versions,
   checking enable/disable, restart, file-load timers, and OpenGL viewport capture.
